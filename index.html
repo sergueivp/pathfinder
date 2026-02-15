@@ -1,0 +1,2670 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>PATHFINDER — MARS SECTOR SELECTION</title>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
+  <link
+    href="https://fonts.googleapis.com/css2?family=Orbitron:wght@400;700;900&family=Share+Tech+Mono&family=Exo+2:ital,wght@0,300;0,400;0,600;1,300&display=swap"
+    rel="stylesheet">
+  <!-- ═══════════════════════════════════════════════════════════
+     FIREBASE SETUP — REPLACE THESE 6 LINES WITH YOUR CONFIG
+     Get from: Firebase Console → Project Settings → Your apps
+     ════════════════════════════════════════════════════════ -->
+  <script type="module">
+    import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-app.js";
+    import { getDatabase, ref, onValue, set, get }
+      from "https://www.gstatic.com/firebasejs/10.12.0/firebase-database.js";
+
+    const firebaseConfig = {
+      apiKey: "AIzaSyCIzFF1Jf8FFIMSVrjPkvy7gg7Y2ho0Xes",
+      authDomain: "pathfinder-mars.firebaseapp.com",
+      databaseURL: "https://pathfinder-mars-default-rtdb.europe-west1.firebasedatabase.app",
+      projectId: "pathfinder-mars",
+      storageBucket: "pathfinder-mars.firebasestorage.app",
+      messagingSenderId: "476040948031",
+      appId: "1:476040948031:web:5ac693a0d3786d15ba8b8a",
+      measurementId: "G-F1NKNNQKT8"
+    };
+    // ══════════════════════════════════════════════════════════
+
+    const app = initializeApp(firebaseConfig);
+    const db = getDatabase(app);
+    const claimsRef = ref(db, 'pathfinder/claims');
+
+    // Make Firebase refs available to global scope for Teacher Controls
+    window.db = db;
+    window.ref = ref;
+    window.set = set;
+    window.onValue = onValue; // Export onValue
+    window.get = get; // Export get
+    window.claimsRef = claimsRef;
+
+    // Initialize Voting logic now that Firebase is ready
+    if (window.initVoting) window.initVoting();
+
+    // ── Live listener: re-render grid whenever DB changes ──
+    const omegaRef = ref(db, 'pathfinder/omega_revealed');
+    window.omegaRef = omegaRef;
+
+    onValue(omegaRef, (snap) => {
+      if (snap.val() === true) {
+        if (window.execOmegaReveal) window.execOmegaReveal();
+      }
+    });
+
+    onValue(claimsRef, (snap) => {
+      window.__claims = snap.val() || {};
+      renderGrid(window.__claims);
+      updateBanner(window.__claims);
+    }, (error) => {
+      console.error("Firebase Read Error:", error);
+      const grid = document.getElementById('sector-grid');
+      if (grid) {
+        grid.innerHTML = `<div style="font-family:'Share Tech Mono',monospace;font-size:12px;color:var(--red);padding:40px;text-align:center;line-height:1.6;">
+        ⚠ CONNECTION ERROR<br>
+        ${error.message}<br><br>
+        <span style="color:var(--text-dim)">Possible cause: Database Rules are locked.<br>
+        Go to Firebase Console → Realtime Database → Rules.<br>
+        Set ".read": true and ".write": true</span>
+      </div>`;
+      }
+    });
+
+    // ── Claim a sector ──
+    window.firebaseClaim = async function (sectorKey, teamName) {
+      const snap = await get(claimsRef);
+      const current = snap.val() || {};
+      if (current[sectorKey]) return { error: 'already_claimed' };
+      current[sectorKey] = teamName;
+      await set(claimsRef, current);
+      return { ok: true };
+    };
+
+    // ── Teacher reset (hidden) ──
+    window.firebaseReset = async function () {
+      await set(claimsRef, {});
+    };
+  </script>
+  <style>
+    :root {
+      --bg: #05090e;
+      --bg2: #0a1219;
+      --bg3: #0f1a24;
+      --amber: #f0a500;
+      --amber-dim: #7a5200;
+      --amber-glow: rgba(240, 165, 0, .10);
+      --red: #e84040;
+      --red-dim: #5a1212;
+      --green: #2ecc71;
+      --green-dim: #0f3d22;
+      --blue: #4fc3f7;
+      --blue-dim: #0a2d40;
+      --text: #b8ccd8;
+      --text-dim: #4a6a7a;
+      --border: rgba(240, 165, 0, .18);
+    }
+
+    * {
+      margin: 0;
+      padding: 0;
+      box-sizing: border-box;
+    }
+
+    html {
+      scroll-behavior: smooth;
+    }
+
+    body {
+      background: var(--bg);
+      color: var(--text);
+      font-family: 'Exo 2', sans-serif;
+      font-weight: 300;
+      min-height: 100vh;
+      overflow-x: hidden;
+      background-image: repeating-linear-gradient(0deg, transparent, transparent 2px, rgba(240, 165, 0, .018) 2px, rgba(240, 165, 0, .018) 4px);
+    }
+
+    /* ── TOP BAR ── */
+    .topbar {
+      background: linear-gradient(90deg, #08101a, #101d2a, #08101a);
+      border-bottom: 1px solid var(--border);
+      padding: 10px 20px;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      position: sticky;
+      top: 0;
+      z-index: 200;
+      gap: 12px;
+      flex-wrap: wrap;
+    }
+
+    .tb-left {
+      font-family: 'Orbitron', monospace;
+      font-size: 9px;
+      letter-spacing: 3px;
+      color: var(--amber);
+    }
+
+    .tb-right {
+      font-family: 'Share Tech Mono', monospace;
+      font-size: 10px;
+      color: var(--text-dim);
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      flex-wrap: wrap;
+    }
+
+    .fuel-pill {
+      background: var(--red-dim);
+      border: 1px solid var(--red);
+      color: var(--red);
+      padding: 3px 10px;
+      font-size: 10px;
+      letter-spacing: 1px;
+      animation: blink 2.2s ease-in-out infinite;
+    }
+
+    @keyframes blink {
+
+      0%,
+      100% {
+        opacity: 1
+      }
+
+      50% {
+        opacity: .45
+      }
+    }
+
+    /* ── PHASE BANNER ── */
+    #phase-banner {
+      background: linear-gradient(90deg, #0a1a10, #0f2018, #0a1a10);
+      border-bottom: 1px solid rgba(46, 204, 113, .2);
+      padding: 8px 24px;
+      text-align: center;
+      font-family: 'Orbitron', monospace;
+      font-size: 9px;
+      letter-spacing: 3px;
+      color: var(--green);
+    }
+
+    /* ── LANDING ── */
+    #view-landing {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      padding: 32px 16px 60px;
+    }
+
+    .logo {
+      font-family: 'Orbitron', monospace;
+      font-weight: 900;
+      font-size: clamp(16px, 4vw, 26px);
+      letter-spacing: 6px;
+      color: var(--amber);
+      text-shadow: 0 0 40px rgba(240, 165, 0, .45);
+      margin-bottom: 6px;
+      text-align: center;
+    }
+
+    .logo-sub {
+      font-family: 'Share Tech Mono', monospace;
+      font-size: 10px;
+      letter-spacing: 4px;
+      color: var(--text-dim);
+      margin-bottom: 8px;
+      text-align: center;
+    }
+
+    .mission-brief {
+      background: rgba(240, 165, 0, .05);
+      border: 1px solid var(--border);
+      max-width: 740px;
+      width: 100%;
+      padding: 14px 20px;
+      margin-bottom: 28px;
+      font-family: 'Share Tech Mono', monospace;
+      font-size: 11px;
+      line-height: 1.85;
+      color: var(--text-dim);
+    }
+
+    .mission-brief span {
+      color: var(--amber);
+    }
+
+    .sector-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+      gap: 12px;
+      max-width: 1020px;
+      width: 100%;
+    }
+
+    /* ── CARDS ── */
+    .sector-card {
+      background: var(--bg2);
+      border: 1px solid var(--border);
+      display: flex;
+      flex-direction: column;
+      position: relative;
+      transition: transform .2s, box-shadow .2s;
+      overflow: hidden;
+    }
+
+    .sector-card.available {
+      cursor: pointer;
+    }
+
+    .sector-card.available:hover {
+      transform: translateY(-3px);
+      box-shadow: 0 8px 28px rgba(240, 165, 0, .12);
+    }
+
+    .sector-card.occupied {
+      opacity: .75;
+      filter: grayscale(.2);
+      cursor: pointer;
+      transition: all .2s;
+    }
+
+    .sector-card.occupied:hover {
+      opacity: 1;
+      filter: grayscale(0);
+      transform: translateY(-2px);
+      box-shadow: 0 4px 12px rgba(232, 64, 64, .15);
+    }
+
+    .card-top {
+      background: rgba(240, 165, 0, .06);
+      border-bottom: 1px solid rgba(255, 255, 255, .05);
+      padding: 12px 14px;
+    }
+
+    .card-icon {
+      font-size: 18px;
+      margin-bottom: 4px;
+    }
+
+    .card-name {
+      font-family: 'Orbitron', monospace;
+      font-size: 10px;
+      letter-spacing: 2px;
+      color: var(--amber);
+      line-height: 1.3;
+    }
+
+    .card-loc {
+      font-family: 'Share Tech Mono', monospace;
+      font-size: 9px;
+      color: var(--text-dim);
+      margin-top: 3px;
+    }
+
+    .card-body {
+      padding: 12px 14px;
+      flex: 1;
+    }
+
+    .card-stats {
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+      margin-bottom: 10px;
+    }
+
+    .cs-row {
+      display: flex;
+      justify-content: space-between;
+      align-items: baseline;
+    }
+
+    .cs-lbl {
+      font-family: 'Share Tech Mono', monospace;
+      font-size: 9px;
+      color: var(--text-dim);
+      letter-spacing: .4px;
+    }
+
+    .cs-val {
+      font-family: 'Orbitron', monospace;
+      font-size: 10px;
+    }
+
+    .cs-val.good {
+      color: var(--green)
+    }
+
+    .cs-val.warn {
+      color: var(--amber)
+    }
+
+    .cs-val.bad {
+      color: var(--red)
+    }
+
+    .cs-val.txt {
+      color: var(--text)
+    }
+
+    .card-hook {
+      font-family: 'Share Tech Mono', monospace;
+      font-size: 10px;
+      color: var(--text-dim);
+      line-height: 1.65;
+      border-top: 1px solid rgba(255, 255, 255, .05);
+      padding-top: 10px;
+      margin-top: 8px;
+    }
+
+    .card-hook .hi {
+      color: var(--text);
+    }
+
+    .card-footer {
+      border-top: 1px solid rgba(255, 255, 255, .05);
+    }
+
+    .card-footer-avail {
+      font-family: 'Share Tech Mono', monospace;
+      font-size: 9px;
+      letter-spacing: 1px;
+      color: rgba(46, 204, 113, .55);
+      padding: 6px 14px;
+    }
+
+    .card-footer-occ {
+      font-family: 'Share Tech Mono', monospace;
+      font-size: 9px;
+      letter-spacing: 1px;
+      color: rgba(232, 64, 64, .7);
+      padding: 6px 14px;
+      background: rgba(232, 64, 64, .05);
+    }
+
+    .explore-btn {
+      background: rgba(240, 165, 0, .08);
+      border: none;
+      border-top: 1px solid rgba(240, 165, 0, .18);
+      color: var(--amber);
+      font-family: 'Orbitron', monospace;
+      font-size: 9px;
+      letter-spacing: 2px;
+      padding: 10px;
+      cursor: pointer;
+      width: 100%;
+      transition: background .2s;
+    }
+
+    .explore-btn:hover {
+      background: rgba(240, 165, 0, .17);
+    }
+
+    .occ-stamp {
+      position: absolute;
+      top: 0;
+      right: 0;
+      background: var(--red-dim);
+      border-bottom: 1px solid var(--red);
+      border-left: 1px solid var(--red);
+      font-family: 'Orbitron', monospace;
+      font-size: 8px;
+      letter-spacing: 2px;
+      color: var(--red);
+      padding: 3px 8px;
+    }
+
+    /* ── SECTOR DETAIL VIEW ── */
+    #view-detail {
+      display: none;
+    }
+
+    .detail-wrap {
+      max-width: 840px;
+      margin: 0 auto;
+      padding: 24px 16px 80px;
+    }
+
+    .back-btn {
+      background: none;
+      border: 1px solid var(--border);
+      color: var(--text-dim);
+      font-family: 'Share Tech Mono', monospace;
+      font-size: 11px;
+      letter-spacing: 2px;
+      padding: 8px 16px;
+      cursor: pointer;
+      margin-bottom: 28px;
+      display: inline-block;
+      transition: all .2s;
+    }
+
+    .back-btn:hover {
+      color: var(--amber);
+      border-color: var(--amber);
+    }
+
+    .dv-header {
+      border-left: 3px solid var(--amber);
+      padding-left: 20px;
+      margin-bottom: 24px;
+    }
+
+    .dv-lbl {
+      font-family: 'Share Tech Mono', monospace;
+      font-size: 9px;
+      letter-spacing: 4px;
+      color: var(--text-dim);
+      margin-bottom: 6px;
+    }
+
+    .dv-title {
+      font-family: 'Orbitron', monospace;
+      font-size: clamp(18px, 4vw, 30px);
+      font-weight: 900;
+      color: var(--amber);
+      letter-spacing: 3px;
+      text-shadow: 0 0 40px rgba(240, 165, 0, .3);
+    }
+
+    .dv-loc {
+      font-family: 'Share Tech Mono', monospace;
+      font-size: 10px;
+      color: var(--text-dim);
+      margin-top: 5px;
+      letter-spacing: .8px;
+    }
+
+    .pills {
+      display: flex;
+      gap: 8px;
+      flex-wrap: wrap;
+      margin-bottom: 20px;
+    }
+
+    .pill {
+      font-family: 'Share Tech Mono', monospace;
+      font-size: 9px;
+      letter-spacing: 1px;
+      padding: 3px 10px;
+    }
+
+    .pg {
+      background: var(--green-dim);
+      border: 1px solid var(--green);
+      color: var(--green);
+    }
+
+    .pa {
+      background: rgba(240, 165, 0, .08);
+      border: 1px solid var(--amber);
+      color: var(--amber);
+    }
+
+    .pr {
+      background: var(--red-dim);
+      border: 1px solid var(--red);
+      color: var(--red);
+    }
+
+    .pb {
+      background: var(--blue-dim);
+      border: 1px solid var(--blue);
+      color: var(--blue);
+    }
+
+    .dblock {
+      background: var(--bg2);
+      border: 1px solid rgba(255, 255, 255, .05);
+      border-top: 2px solid var(--amber-dim);
+      margin-bottom: 14px;
+    }
+
+    .dbhdr {
+      background: rgba(240, 165, 0, .05);
+      border-bottom: 1px solid rgba(255, 255, 255, .05);
+      padding: 9px 16px;
+      font-family: 'Orbitron', monospace;
+      font-size: 9px;
+      letter-spacing: 3px;
+      color: var(--amber);
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+
+    .dbbody {
+      padding: 16px;
+    }
+
+    .dtable {
+      width: 100%;
+      border-collapse: collapse;
+    }
+
+    .dtable tr {
+      border-bottom: 1px solid rgba(255, 255, 255, .04);
+    }
+
+    .dtable tr:last-child {
+      border-bottom: none;
+    }
+
+    .dtable td {
+      padding: 10px 10px;
+      font-size: 12.5px;
+      line-height: 1.6;
+      vertical-align: top;
+    }
+
+    .dtable td:first-child {
+      font-family: 'Share Tech Mono', monospace;
+      font-size: 10px;
+      letter-spacing: .4px;
+      color: var(--text-dim);
+      width: 36%;
+    }
+
+    .dtable td strong {
+      color: var(--amber);
+    }
+
+    .note {
+      display: block;
+      margin-top: 5px;
+      font-family: 'Share Tech Mono', monospace;
+      font-size: 10px;
+      color: var(--text-dim);
+      line-height: 1.7;
+    }
+
+    .rmatrix {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+      gap: 10px;
+    }
+
+    .ritem {
+      background: var(--bg3);
+      border: 1px solid rgba(255, 255, 255, .06);
+      padding: 12px;
+    }
+
+    .ri-lbl {
+      font-family: 'Share Tech Mono', monospace;
+      font-size: 8px;
+      letter-spacing: 2px;
+      color: var(--text-dim);
+      margin-bottom: 5px;
+    }
+
+    .ri-val {
+      font-family: 'Orbitron', monospace;
+      font-size: 20px;
+      font-weight: 700;
+    }
+
+    .ri-desc {
+      font-size: 10px;
+      color: var(--text-dim);
+      margin-top: 3px;
+    }
+
+    .rv-g {
+      color: var(--green)
+    }
+
+    .rv-a {
+      color: var(--amber)
+    }
+
+    .rv-r {
+      color: var(--red)
+    }
+
+    .rec-box {
+      background: rgba(240, 165, 0, .05);
+      border: 1px solid var(--amber-dim);
+      padding: 16px 20px;
+    }
+
+    .rec-hdr {
+      font-family: 'Orbitron', monospace;
+      font-size: 8px;
+      letter-spacing: 3px;
+      color: var(--amber);
+      margin-bottom: 8px;
+    }
+
+    .rec-txt {
+      font-size: 12.5px;
+      line-height: 1.8;
+      color: var(--text-dim);
+    }
+
+    .rec-txt strong {
+      color: var(--text);
+    }
+
+    .chart-block {
+      background: var(--bg2);
+      border: 1px solid rgba(255, 255, 255, .05);
+      border-top: 2px solid var(--amber-dim);
+      margin-bottom: 14px;
+    }
+
+    .chart-hdr {
+      background: rgba(240, 165, 0, .05);
+      border-bottom: 1px solid rgba(255, 255, 255, .05);
+      padding: 9px 16px;
+      font-family: 'Orbitron', monospace;
+      font-size: 9px;
+      letter-spacing: 3px;
+      color: var(--amber);
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+
+    .chart-wrap {
+      padding: 16px;
+      position: relative;
+    }
+
+    .chart-note {
+      font-family: 'Share Tech Mono', monospace;
+      font-size: 9px;
+      color: var(--text-dim);
+      padding: 0 16px 12px;
+    }
+
+    .terrain-info {
+      font-family: 'Share Tech Mono', monospace;
+      font-size: 9px;
+      color: var(--text-dim);
+      padding: 8px 16px 12px;
+    }
+
+    .mandate {
+      background: linear-gradient(135deg, #0a1810, #081210);
+      border: 1px solid rgba(46, 204, 113, .22);
+      border-left: 3px solid var(--green);
+      padding: 20px 24px;
+      margin-top: 24px;
+    }
+
+    .mandate-title {
+      font-family: 'Orbitron', monospace;
+      font-size: 9px;
+      letter-spacing: 3px;
+      color: var(--green);
+      margin-bottom: 10px;
+    }
+
+    .mandate-txt {
+      font-size: 12.5px;
+      line-height: 1.8;
+      color: var(--text-dim);
+    }
+
+    .mandate-txt strong {
+      color: var(--text);
+    }
+
+    .stamp {
+      text-align: center;
+      margin-top: 48px;
+      font-family: 'Share Tech Mono', monospace;
+      font-size: 8px;
+      letter-spacing: 3px;
+      color: var(--text-dim);
+      opacity: .3;
+    }
+
+    /* ── CLAIM SECTION ── */
+    .claim-zone {
+      background: linear-gradient(135deg, #0a1a10, #0c1c12);
+      border: 1px solid rgba(46, 204, 113, .3);
+      border-top: 2px solid var(--green);
+      padding: 24px;
+      margin-top: 16px;
+      text-align: center;
+    }
+
+    .claim-zone.occ {
+      background: var(--red-dim);
+      border-color: rgba(232, 64, 64, .3);
+      border-top-color: var(--red);
+    }
+
+    .claim-title {
+      font-family: 'Orbitron', monospace;
+      font-size: 11px;
+      letter-spacing: 3px;
+      color: var(--green);
+      margin-bottom: 8px;
+    }
+
+    .claim-title.r {
+      color: var(--red);
+    }
+
+    .claim-desc {
+      font-family: 'Share Tech Mono', monospace;
+      font-size: 11px;
+      color: var(--text-dim);
+      line-height: 1.7;
+      margin-bottom: 18px;
+    }
+
+    .team-sel {
+      background: var(--bg3);
+      border: 1px solid var(--border);
+      color: var(--text);
+      font-family: 'Orbitron', monospace;
+      font-size: 11px;
+      letter-spacing: 1px;
+      padding: 10px 16px;
+      margin-bottom: 12px;
+      width: 100%;
+      max-width: 320px;
+      cursor: pointer;
+    }
+
+    .team-sel option {
+      background: var(--bg3);
+    }
+
+    .claim-btn {
+      background: rgba(46, 204, 113, .1);
+      border: 1px solid var(--green);
+      color: var(--green);
+      font-family: 'Orbitron', monospace;
+      font-size: 11px;
+      letter-spacing: 3px;
+      padding: 14px 32px;
+      cursor: pointer;
+      transition: all .2s;
+      width: 100%;
+      max-width: 320px;
+      display: block;
+      margin: 0 auto;
+    }
+
+    .claim-btn:hover {
+      background: rgba(46, 204, 113, .2);
+      box-shadow: 0 0 20px rgba(46, 204, 113, .2);
+    }
+
+    .claim-btn:disabled {
+      opacity: .4;
+      cursor: not-allowed;
+    }
+
+    .unlock-link {
+      background: none;
+      border: 1px solid var(--border);
+      color: var(--text-dim);
+      font-family: 'Share Tech Mono', monospace;
+      font-size: 10px;
+      letter-spacing: 1px;
+      padding: 8px 20px;
+      cursor: pointer;
+      margin-top: 10px;
+      transition: all .2s;
+    }
+
+    .unlock-link:hover {
+      color: var(--amber);
+      border-color: var(--amber);
+    }
+
+    /* ── PREVIEW LOCK ── */
+    .preview-lock {
+      background: var(--bg2);
+      border: 1px solid rgba(255, 255, 255, .05);
+      border-top: 2px solid var(--amber-dim);
+      padding: 24px;
+      text-align: center;
+      margin-bottom: 14px;
+    }
+
+    .pl-txt {
+      font-family: 'Share Tech Mono', monospace;
+      font-size: 11px;
+      color: var(--text-dim);
+      letter-spacing: 1px;
+      line-height: 1.85;
+      margin-bottom: 16px;
+    }
+
+    .pl-txt span {
+      color: var(--amber);
+    }
+
+    /* ── MODALS ── */
+    .modal-overlay {
+      display: none;
+      position: fixed;
+      inset: 0;
+      background: rgba(5, 9, 14, .93);
+      z-index: 500;
+      align-items: center;
+      justify-content: center;
+      padding: 20px;
+    }
+
+    .modal-overlay.open {
+      display: flex;
+    }
+
+    .modal-box {
+      background: var(--bg2);
+      border: 1px solid var(--border);
+      padding: 36px;
+      max-width: 420px;
+      width: 100%;
+      text-align: center;
+    }
+
+    .modal-box.green-top {
+      border-top: 3px solid var(--green);
+    }
+
+    .modal-box.amber-top {
+      border-top: 3px solid var(--amber);
+    }
+
+    .modal-title {
+      font-family: 'Orbitron', monospace;
+      font-size: 13px;
+      letter-spacing: 3px;
+      color: var(--amber);
+      margin-bottom: 6px;
+    }
+
+    .modal-title.gr {
+      color: var(--green);
+    }
+
+    .modal-sub {
+      font-family: 'Share Tech Mono', monospace;
+      font-size: 10px;
+      color: var(--text-dim);
+      letter-spacing: 2px;
+      margin-bottom: 24px;
+    }
+
+    .code-input {
+      background: var(--bg3);
+      border: 1px solid var(--border);
+      border-bottom: 2px solid var(--amber);
+      color: var(--amber);
+      font-family: 'Orbitron', monospace;
+      font-size: 18px;
+      letter-spacing: 6px;
+      text-align: center;
+      padding: 12px;
+      width: 100%;
+      margin-bottom: 16px;
+      outline: none;
+      text-transform: uppercase;
+    }
+
+    .code-input:focus {
+      box-shadow: 0 0 20px rgba(240, 165, 0, .1);
+    }
+
+    .modal-btn {
+      background: var(--amber-glow);
+      border: 1px solid var(--amber);
+      color: var(--amber);
+      font-family: 'Orbitron', monospace;
+      font-size: 11px;
+      letter-spacing: 2px;
+      padding: 12px 32px;
+      cursor: pointer;
+      width: 100%;
+      transition: all .2s;
+      margin-bottom: 10px;
+    }
+
+    .modal-btn:hover {
+      background: rgba(240, 165, 0, .2);
+    }
+
+    .modal-btn.gr {
+      background: var(--green-dim);
+      border-color: var(--green);
+      color: var(--green);
+    }
+
+    .modal-btn.gr:hover {
+      background: rgba(46, 204, 113, .2);
+    }
+
+    .modal-cancel {
+      background: none;
+      border: none;
+      color: var(--text-dim);
+      font-family: 'Share Tech Mono', monospace;
+      font-size: 11px;
+      cursor: pointer;
+      letter-spacing: 1px;
+    }
+
+    .code-error {
+      display: none;
+      color: var(--red);
+      font-family: 'Share Tech Mono', monospace;
+      font-size: 11px;
+      margin-top: 8px;
+    }
+
+    .code-display {
+      font-family: 'Orbitron', monospace;
+      font-size: 26px;
+      letter-spacing: 6px;
+      color: var(--amber);
+      background: var(--bg3);
+      border: 1px solid var(--border);
+      padding: 14px;
+      margin-bottom: 12px;
+      text-shadow: 0 0 20px rgba(240, 165, 0, .4);
+    }
+
+    .code-note {
+      font-family: 'Share Tech Mono', monospace;
+      font-size: 10px;
+      color: var(--text-dim);
+      letter-spacing: 1px;
+      margin-bottom: 20px;
+      line-height: 1.7;
+    }
+
+    /* ── OMEGA ── */
+    #omega-overlay {
+      display: none;
+      position: fixed;
+      inset: 0;
+      background: #000;
+      z-index: 1000;
+      overflow: hidden;
+    }
+
+    #omega-scan {
+      position: absolute;
+      inset: 0;
+      pointer-events: none;
+      background: repeating-linear-gradient(0deg, transparent, transparent 2px, rgba(232, 64, 64, .03) 2px, rgba(232, 64, 64, .03) 4px);
+    }
+
+    #omega-inner {
+      position: relative;
+      z-index: 2;
+      max-width: 860px;
+      margin: 0 auto;
+      padding: 32px 24px 60px;
+      height: 100vh;
+      overflow-y: auto;
+    }
+
+    #omega-bar {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      border-bottom: 1px solid rgba(232, 64, 64, .3);
+      padding-bottom: 12px;
+      margin-bottom: 28px;
+      font-family: 'Share Tech Mono', monospace;
+      font-size: 11px;
+      letter-spacing: 2px;
+    }
+
+    #omega-signal {
+      color: var(--red);
+      animation: blink 1.4s ease-in-out infinite;
+    }
+
+    #omega-esc {
+      color: rgba(232, 64, 64, .35);
+      cursor: pointer;
+      font-size: 10px;
+      letter-spacing: 2px;
+      transition: color .2s;
+    }
+
+    #omega-esc:hover {
+      color: var(--red);
+    }
+
+    .tx {
+      font-family: 'Share Tech Mono', monospace;
+    }
+
+    .tx-line {
+      font-size: 12px;
+      line-height: 1.9;
+      color: rgba(200, 216, 232, .12);
+      opacity: 0;
+      transform: translateX(-6px);
+      transition: all .38s ease;
+      letter-spacing: .4px;
+    }
+
+    .tx-line.vis {
+      opacity: 1;
+      transform: none;
+      color: #c8d8e8;
+    }
+
+    .tx-line.hi {
+      color: var(--red) !important;
+      font-weight: bold;
+    }
+
+    .tx-line.am {
+      color: var(--amber) !important;
+    }
+
+    .tx-line.di {
+      color: rgba(200, 216, 232, .32) !important;
+    }
+
+    .tx-line.gap {
+      height: 14px;
+    }
+
+    .tx-big {
+      font-family: 'Orbitron', monospace;
+      font-size: clamp(18px, 3vw, 26px);
+      font-weight: 900;
+      color: var(--red);
+      letter-spacing: 4px;
+      margin: 20px 0 4px;
+      opacity: 0;
+      transform: translateY(6px);
+      transition: all .5s ease;
+      text-shadow: 0 0 40px rgba(232, 64, 64, .6);
+    }
+
+    .tx-big.vis {
+      opacity: 1;
+      transform: none;
+    }
+
+    /* ── VOTING UI ── */
+    .vote-slots {
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
+      margin-bottom: 24px;
+    }
+
+    .vote-slot {
+      background: var(--bg3);
+      border: 1px solid var(--border);
+      padding: 12px;
+      display: flex;
+      align-items: center;
+      cursor: pointer;
+      transition: all .2s;
+    }
+
+    .vote-slot:hover {
+      border-color: var(--amber);
+    }
+
+    .vote-slot.filled {
+      background: rgba(240, 165, 0, .1);
+      border-color: var(--amber);
+    }
+
+    .slot-rank {
+      font-family: 'Orbitron', monospace;
+      font-size: 14px;
+      color: var(--amber-dim);
+      margin-right: 16px;
+      width: 24px;
+    }
+
+    .slot-val {
+      font-family: 'Share Tech Mono', monospace;
+      font-size: 14px;
+      color: var(--text-dim);
+      flex: 1;
+    }
+
+    .filled .slot-val {
+      color: var(--amber);
+      font-weight: bold;
+    }
+
+    .slot-x {
+      color: var(--red);
+      font-size: 12px;
+      opacity: 0;
+    }
+
+    .filled .slot-x {
+      opacity: 1;
+    }
+
+    .vote-pool {
+      display: grid;
+      grid-template-columns: repeat(2, 1fr);
+      gap: 8px;
+      margin-bottom: 24px;
+    }
+
+    .pool-btn {
+      background: rgba(255, 255, 255, 0.03);
+      border: 1px solid var(--border);
+      color: var(--text-dim);
+      font-family: 'Share Tech Mono', monospace;
+      font-size: 11px;
+      padding: 10px;
+      cursor: pointer;
+      text-align: left;
+      transition: all .2s;
+    }
+
+    .pool-btn:hover {
+      background: rgba(255, 255, 255, 0.06);
+      color: var(--text);
+    }
+
+    .pool-btn.selected {
+      opacity: 0.3;
+      pointer-events: none;
+      border-color: transparent;
+    }
+
+    .tx-verdict {
+      background: rgba(232, 64, 64, .07);
+      border: 1px solid rgba(232, 64, 64, .32);
+      border-left: 3px solid var(--red);
+      padding: 16px 20px;
+      margin-top: 20px;
+      opacity: 0;
+      transform: translateY(8px);
+      transition: all .6s ease;
+    }
+
+    .tx-verdict.vis {
+      opacity: 1;
+      transform: none;
+    }
+
+    .tx-verdict p {
+      font-family: 'Share Tech Mono', monospace;
+      font-size: 12px;
+      line-height: 1.85;
+      color: var(--text-dim);
+    }
+
+    .tx-verdict p strong {
+      color: var(--red);
+    }
+
+    /* misc */
+    @keyframes fadeUp {
+      from {
+        opacity: 0;
+        transform: translateY(10px)
+      }
+
+      to {
+        opacity: 1;
+        transform: none
+      }
+    }
+
+    .fu {
+      animation: fadeUp .35s ease forwards;
+    }
+
+    @media(max-width:500px) {
+      .rmatrix {
+        grid-template-columns: 1fr 1fr;
+      }
+    }
+
+    /* ── VOTING ── */
+    .vote-card {
+      background: rgba(46, 204, 113, .05);
+      border: 1px solid var(--green);
+      cursor: pointer;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      text-align: center;
+      transition: all .2s;
+      min-height: 300px;
+    }
+
+    .vote-card:hover {
+      background: rgba(46, 204, 113, .15);
+      box-shadow: 0 0 20px rgba(46, 204, 113, .2);
+    }
+
+    .vote-icon {
+      font-size: 40px;
+      margin-bottom: 16px;
+      color: var(--green);
+    }
+
+    .vote-title {
+      font-family: 'Orbitron';
+      font-size: 16px;
+      letter-spacing: 3px;
+      color: var(--green);
+      margin-bottom: 8px;
+    }
+
+    .vote-desc {
+      font-family: 'Share Tech Mono';
+      font-size: 11px;
+      color: var(--text-dim);
+      max-width: 200px;
+      line-height: 1.6;
+    }
+
+    .vote-rank-row {
+      display: flex;
+      gap: 12px;
+      margin-bottom: 16px;
+      align-items: center;
+    }
+
+    .vote-rank-lbl {
+      font-family: 'Orbitron';
+      color: var(--amber);
+      width: 60px;
+      text-align: right;
+      font-size: 12px;
+    }
+
+    .vote-select {
+      background: var(--bg3);
+      border: 1px solid var(--border);
+      color: var(--text);
+      font-family: 'Share Tech Mono';
+      padding: 8px;
+      width: 100%;
+      outline: none;
+    }
+
+    /* ── RESULTS CHART ── */
+    #results-overlay {
+      display: none;
+      position: fixed;
+      inset: 0;
+      background: #05090e;
+      z-index: 2000;
+      padding: 40px;
+      overflow-y: auto;
+    }
+
+    .res-bar-row {
+      margin-bottom: 12px;
+    }
+
+    .res-bar-lbl {
+      display: flex;
+      justify-content: space-between;
+      font-family: 'Share Tech Mono';
+      font-size: 12px;
+      color: var(--text-dim);
+      margin-bottom: 4px;
+    }
+
+    .res-bar-track {
+      background: rgba(255, 255, 255, 0.05);
+      height: 20px;
+      width: 100%;
+      position: relative;
+    }
+
+    .res-bar-fill {
+      height: 100%;
+      transition: width 1s ease-out;
+    }
+
+    .res-val {
+      position: absolute;
+      right: 8px;
+      top: 0;
+      bottom: 0;
+      display: flex;
+      align-items: center;
+      font-family: 'Orbitron';
+      font-size: 11px;
+      color: #fff;
+      text-shadow: 0 0 4px #000;
+    }
+  </style>
+</head>
+
+<body>
+
+  <!-- TOP BAR -->
+  <div class="topbar">
+    <div class="tb-left">PATHFINDER FLEET — MARS ORBITAL COMMAND</div>
+    <div class="tb-right">
+      <span class="fuel-pill">⚠ FUEL: 4% — CRITICAL</span>
+      <span>SOL 10 &nbsp;|&nbsp; FINAL LANDING WINDOW</span>
+      <span onclick="openTeacherDashboard()" style="cursor:pointer;opacity:0.3;margin-left:10px;font-size:14px;"
+        title="Teacher Controls">⚙</span>
+    </div>
+  </div>
+
+  <!-- PHASE BANNER -->
+  <div id="phase-banner">CONNECTING TO MISSION COMMAND…</div>
+
+  <!-- ═══════════════════════════════════════════════════════════
+       TEACHER DASHBOARD
+       ═══════════════════════════════════════════════════════════ -->
+  <div class="modal-overlay" id="modal-teacher">
+    <div class="modal-box" style="border-top:3px solid var(--blue);max-width:600px;">
+      <div class="modal-title" style="color:var(--blue);">MISSION CONTROL — TEACHER DASHBOARD</div>
+      <div class="modal-sub">MANAGE SECTOR CLAIMS & SIMULATION STATE</div>
+
+      <div id="teacher-list" style="text-align:left;margin-bottom:20px;max-height:300px;overflow-y:auto;">
+        <!-- Dynamic list of sectors -->
+      </div>
+
+      <div
+        style="border-top:1px solid var(--border);padding-top:20px;margin-top:20px;display:flex;gap:12px;justify-content:center;flex-wrap:wrap;">
+        <div style="width:100%;margin-bottom:10px;text-align:center;">
+          <label style="color:var(--text-dim);font-family:'Share Tech Mono';font-size:11px;">CLASS SIZE (FOR
+            VOTING)</label>
+          <input type="number" id="class-size-input" value="25"
+            style="background:var(--bg3);border:1px solid var(--border);color:var(--text);padding:4px 8px;width:60px;text-align:center;font-family:'Orbitron';margin-left:8px;">
+          <button onclick="window.saveClassSize()"
+            style="background:var(--bg3);border:1px solid var(--border);color:var(--green);padding:4px 8px;cursor:pointer;font-family:'Share Tech Mono';font-size:10px;">SAVE</button>
+        </div>
+
+        <button class="modal-btn" style="background:var(--red-dim);border-color:var(--red);color:var(--red);width:auto;"
+          onclick="window.teacherResetAll()">⚠ RESET ALL TEAMS</button>
+        <button class="modal-btn"
+          style="background:rgba(232,64,64,.1);border-color:var(--red);color:var(--red);width:auto;"
+          onclick="window.fireOmega();window.closeTeacherDashboard()">☢ TRIGGER OMEGA EVENT</button>
+      </div>
+      <button class="modal-cancel" onclick="window.closeTeacherDashboard()" style="margin-top:16px;">CLOSE
+        DASHBOARD</button>
+    </div>
+  </div>
+
+  <!-- ═══════════ VIEW: SECTOR SELECTION ═══════════ -->
+  <div id="view-landing">
+    <div class="logo">PATHFINDER MISSION</div>
+    <div class="logo-sub">MARS LANDING SECTOR SELECTION · SOL 10</div>
+    <div class="mission-brief">
+      <span>MISSION STATUS:</span> Pathfinder fleet in decaying orbit. Fuel reserve: 4%. One landing sequence available.
+      Entry window closes in 90 minutes.<br>
+      <span>YOUR TASK:</span> Review available sectors. Claim the sector your team will analyse and defend before the
+      Mission Council.<br>
+      <span>RULES:</span> Each sector can only be claimed by one team — first team to block it locks it for everyone.
+      Study the preliminary data before committing. One sector will remain unclaimed.
+    </div>
+    <div class="sector-grid" id="sector-grid">
+      <div
+        style="font-family:'Share Tech Mono',monospace;font-size:12px;color:var(--text-dim);padding:40px;grid-column:1/-1;text-align:center;">
+        Connecting to mission database…</div>
+    </div>
+  </div>
+
+  <!-- ═══════════ VIEW: SECTOR DETAIL ═══════════ -->
+  <div id="view-detail">
+    <div class="detail-wrap">
+      <button class="back-btn" onclick="goHome()">← SECTOR SELECTION</button>
+      <div id="detail-content"></div>
+    </div>
+  </div>
+
+  <!-- ═══════════ MODAL: CODE UNLOCK ═══════════ -->
+  <div class="modal-overlay" id="modal-code">
+    <div class="modal-box amber-top">
+      <div class="modal-title" id="mc-sector">SECTOR ACCESS</div>
+      <div class="modal-sub">VERIFY IDENTITY & ACCESS CODE</div>
+
+      <select class="team-sel" id="code-team-sel" style="margin-bottom:12px;text-align-last:center;">
+        <option value="">— SELECT YOUR TEAM —</option>
+        <option value="TEAM 1">TEAM 1</option>
+        <option value="TEAM 2">TEAM 2</option>
+        <option value="TEAM 3">TEAM 3</option>
+        <option value="TEAM 4">TEAM 4</option>
+        <option value="TEAM 5">TEAM 5</option>
+        <option value="TEAM 6">TEAM 6</option>
+      </select>
+
+      <input class="code-input" id="code-input" type="text" maxlength="8" placeholder="XXX-0000" autocomplete="off"
+        spellcheck="false">
+      <button class="modal-btn" onclick="validateCode()">AUTHENTICATE →</button>
+      <button class="modal-cancel" onclick="closeCodeModal()">CANCEL</button>
+      <div class="code-error" id="code-error">⚠ ACCESS DENIED — INVALID CODE</div>
+    </div>
+  </div>
+
+  <!-- ═══════════ MODAL: CLAIM CONFIRMED ═══════════ -->
+  <div class="modal-overlay" id="modal-claimed">
+    <div class="modal-box green-top">
+      <div class="modal-title gr">✓ SECTOR CLAIMED</div>
+      <div class="modal-sub" id="mc-sub">Your team has claimed this sector.</div>
+      <div class="code-display" id="mc-code">XXX-0000</div>
+      <div class="code-note">Write this code down. You will need it to unlock the<br>full classified briefing on your
+        device.</div>
+      <button class="modal-btn gr" onclick="closeClaimModal()">UNDERSTOOD — OPEN MY FULL BRIEFING →</button>
+    </div>
+  </div>
+
+  <!-- ═══════════ OMEGA TRANSMISSION ═══════════ -->
+  <div id="omega-overlay">
+    <div id="omega-scan"></div>
+    <div id="omega-inner">
+      <div id="omega-bar">
+        <span id="omega-signal">◉ &nbsp;INCOMING TRANSMISSION — MISSION COMMAND — PRIORITY ALPHA</span>
+        <span id="omega-esc" onclick="closeOmega()">[ESC]</span>
+      </div>
+      <div class="tx" id="omega-tx"></div>
+    </div>
+  </div>
+
+  <!-- ═══════════ MODAL: VOTING ═══════════ -->
+  <div class="modal-overlay" id="modal-vote">
+    <div class="modal-box green-top" style="max-width:500px;">
+      <div class="modal-title gr">FINAL MISSION VOTE</div>
+      <div class="modal-sub">SELECT TOP 3 SECTORS FOR LANDING.<br>YOU CANNOT VOTE FOR YOUR OWN SECTOR.</div>
+
+      <div id="vote-form">
+        <!-- Injected via JS -->
+      </div>
+
+      <div id="vote-err" class="code-error" style="margin-bottom:12px;"></div>
+      <button class="modal-btn gr" onclick="submitVote()">TRANSMIT RECOMMENDATION</button>
+      <button class="modal-cancel" onclick="closeVoteModal()">CANCEL</button>
+    </div>
+  </div>
+
+  <!-- ═══════════ VIEW: RESULTS ═══════════ -->
+  <div id="results-overlay">
+    <div style="max-width:800px;margin:0 auto;">
+      <div class="dv-header">
+        <div class="dv-lbl">MISSION COMMAND — FINAL DECISION</div>
+        <div class="dv-title" style="color:var(--green)">SECTOR SELECTION RESULTS</div>
+        <div class="dv-loc" id="total-votes">WAITING FOR DATA...</div>
+      </div>
+      <div id="results-chart" style="margin-top:40px;"></div>
+      <button class="back-btn" onclick="closeResults()" style="margin-top:40px;position:static;">CLOSE RESULTS</button>
+    </div>
+  </div>
+
+  <script>
+    // ══════════════════════════════════════════════════
+    //  ACCESS CODES — teacher distributes after claiming
+    // ══════════════════════════════════════════════════
+    const CODES = {
+      jezero: 'JEZ-4471',
+      hellas: 'HEL-8823',
+      olympus: 'OLY-5502',
+      valles: 'VAL-7734',
+      arabia: 'ARB-3316',
+      vastitas: 'VAS-9950',
+      omega: 'AMAZONIS-99'
+    };
+
+    // ══════════════════════════════════════════════════
+    //  TEASER DATA — public, all teams can read
+    // ══════════════════════════════════════════════════
+    const TEASER = {
+      jezero: {
+        icon: '⊙', name: 'JEZERO CRATER', loc: '18.4°N / 77.7°E — Former Lacustrine Basin',
+        stats: [{ l: 'TERRAIN GRADIENT', v: '1.8°', c: 'good' }, { l: 'DAYTIME TEMP', v: '–20°C', c: 'txt' }, { l: 'SIGNAL QUALITY', v: '72%', c: 'txt' }, { l: 'WATER EVIDENCE', v: 'CONFIRMED', c: 'good' }, { l: 'SOIL CHEMISTRY', v: 'VERIFY', c: 'warn' }],
+        pills: [{ t: 'ANCIENT LAKE: CONFIRMED', c: 'pb' }, { t: 'TERRAIN: MODERATE', c: 'pa' }, { t: 'SOIL: REVIEW REQUIRED', c: 'pr' }],
+        hook: 'Former lake bed with confirmed ancient water. <span class="hi">Water deposits at 15–25m depth.</span> Good approach corridor. Soil chemistry data requires further review before EVA clearance.',
+        advisory: 'Soil chemical data: detailed analysis in full briefing only.'
+      },
+      hellas: {
+        icon: '◎', name: 'HELLAS PLANITIA', loc: '42.4°S / 70.5°E — Deepest Impact Basin on Mars',
+        stats: [{ l: 'TERRAIN GRADIENT', v: '0.9°', c: 'good' }, { l: 'DAYTIME TEMP', v: '+5°C', c: 'good' }, { l: 'ATM. PRESSURE', v: '1,160 Pa', c: 'good' }, { l: 'WIND SPEED', v: '8 km/h', c: 'good' }, { l: 'COMMS WINDOW', v: 'VERIFY', c: 'warn' }],
+        pills: [{ t: 'PRESSURE: HIGHEST ON PLANET', c: 'pg' }, { t: 'TEMP: WARMEST SITE', c: 'pg' }, { t: 'COMMS: REVIEW REQUIRED', c: 'pr' }],
+        hook: 'Lowest point on Mars — <span class="hi">warmest, most pressurised landing environment on the planet.</span> Exceptional terrain. Communication geometry from basin depth in full briefing.',
+        advisory: 'Basin horizon obstruction: full calculation in classified briefing.'
+      },
+      olympus: {
+        icon: '▲', name: 'OLYMPUS MONS', loc: '18.6°N / 226.2°E — Solar Shield Lower Flank',
+        stats: [{ l: 'SOLAR IRRADIANCE', v: '680 W/m²', c: 'good' }, { l: 'SURFACE STRENGTH', v: '4.9 MPa', c: 'good' }, { l: 'DUST EXPOSURE', v: 'MINIMAL', c: 'good' }, { l: 'ALTITUDE', v: '8,200m', c: 'warn' }, { l: 'ATM. PRESSURE', v: 'CHECK DATA', c: 'bad' }],
+        pills: [{ t: 'SOLAR: MAXIMUM ON MARS', c: 'pg' }, { t: 'SURFACE: STRONGEST ROCK', c: 'pg' }, { t: 'ATMOSPHERE: VERIFY', c: 'pr' }],
+        hook: 'Above the dust layer — <span class="hi">best solar generation on the planet.</span> Strongest volcanic rock surface. High elevation comms advantage. Atmospheric profile at landing altitude requires careful review.',
+        advisory: 'Descent trajectory: atmospheric pressure data in full briefing — verify before committing.'
+      },
+      valles: {
+        icon: '≋', name: 'VALLES MARINERIS', loc: '14.0°S / 301.0°E — Canyon Floor, Central Rift',
+        stats: [{ l: 'TERRAIN GRADIENT', v: '0.6°', c: 'good' }, { l: 'WIND SPEED', v: '4 km/h', c: 'good' }, { l: 'ATM. PRESSURE', v: '870 Pa', c: 'good' }, { l: 'DAYTIME TEMP', v: '–15°C', c: 'txt' }, { l: 'COMMS WINDOW', v: 'VERIFY', c: 'warn' }],
+        pills: [{ t: 'SHELTER: NATURAL CANYON', c: 'pg' }, { t: 'WIND: MINIMAL', c: 'pg' }, { t: 'COMMS: VERIFY WINDOW', c: 'pr' }],
+        hook: 'Canyon floor with outstanding natural shelter. <span class="hi">Lowest wind exposure and elevated pressure.</span> Communication window including canyon wall obstruction analysis in full briefing.',
+        advisory: 'Canyon wall signal obstruction: full geometry in classified data.'
+      },
+      arabia: {
+        icon: '◈', name: 'ARABIA TERRA', loc: '10.0°N / 12.0°E — Ancient Noachian Plateau',
+        stats: [{ l: 'APPARENT GRADIENT', v: '1.4°', c: 'good' }, { l: 'SIGNAL QUALITY', v: '79%', c: 'good' }, { l: 'RELAY COVERAGE', v: '14 hrs/day', c: 'good' }, { l: 'SURFACE DENSITY', v: 'VERIFY', c: 'warn' }, { l: 'WATER DEPTH', v: '>35m', c: 'warn' }],
+        pills: [{ t: 'CONDITIONS: MODERATE', c: 'pg' }, { t: 'COMMS: RELIABLE', c: 'pg' }, { t: 'SURFACE: VERIFY LOADING', c: 'pr' }],
+        hook: 'Broad ancient highland with <span class="hi">good communications and reliable solar.</span> Wide apparent landing footprint. Surface material density must be cross-referenced with Pathfinder structural specs.',
+        advisory: 'Regolith load-bearing analysis: full data in classified briefing — mission-critical.'
+      },
+      vastitas: {
+        icon: '❄', name: 'VASTITAS BOREALIS', loc: '68.2°N / 103.5°E — North Polar Periglacial Plain',
+        stats: [{ l: 'SIGNAL QUALITY', v: '97%', c: 'good' }, { l: 'RELAY COVERAGE', v: '22 hrs/day', c: 'good' }, { l: 'WATER ICE DEPTH', v: '1–2m', c: 'good' }, { l: 'NIGHT TEMPERATURE', v: '–120°C', c: 'bad' }, { l: 'SOLAR OUTPUT', v: '380 W/m²', c: 'warn' }],
+        pills: [{ t: 'COMMS: 97% — MAXIMUM', c: 'pb' }, { t: 'WATER ICE: NEAR-SURFACE', c: 'pb' }, { t: 'THERMAL: CRITICAL', c: 'pr' }],
+        hook: 'Best Earth communications of any Mars site. <span class="hi">Near-surface ice accessible without deep drilling.</span> Largest landing zone. Nocturnal thermal budget — including full power calculation — in classified briefing.',
+      },
+      omega: {
+        icon: '⚠', name: 'AMAZONIS PLANITIA', loc: '6.9°N / 158.3°E — Amazonis Planitia',
+        stats: [{ l: 'SIGNAL QUALITY', v: '32% (UNSTABLE)', c: 'warn' }, { l: 'SURFACE DATA', v: 'PARTIAL', c: 'warn' }, { l: 'TELEM. STREAM', v: 'INTERMITTENT', c: 'bad' }, { l: 'RISK ASSESS.', v: 'EVALUATING...', c: 'warn' }],
+        pills: [{ t: 'DATA: INCOMPLETE', c: 'pr' }, { t: 'SIGNAL: WEAK', c: 'pr' }],
+        hook: '<span class="hi">DATA INTEGRITY ALERT.</span> Remote telemetry stream interrupted. Orbital imaging unavailable for this sector. Physical characteristics cannot be verified. <strong>Proceed with caution.</strong>',
+        advisory: 'Data packets dropped. Retrying connection...'
+      }
+    };
+
+    // ══════════════════════════════════════════════════
+    //  FULL CLASSIFIED DATA
+    // ══════════════════════════════════════════════════
+    const FULL = {
+      jezero: {
+        sections: [
+          { icon: '⛰', title: 'TERRAIN ANALYSIS', rows: [['Surface type', 'Former lake bed — ancient lacustrine sediment. <strong>Delta fan deposit</strong> visible in NW quadrant.'], ['Landing gradient', '<strong>1.8°</strong> — within Pathfinder spec (max 5.0°).'], ['Usable landing area', '<strong>8.2 km²</strong> — good approach corridor.'], ['Compressive strength', '<strong>2.8 MPa</strong> avg. Above minimum (1.8 MPa).<span class="note">Delta fan zone (NW): 1.9–2.1 MPa.</span>'], ['Surface obstacles', 'Rocks >0.5m: <strong>1.8 per km²</strong> — moderate.']] },
+          { icon: '🌡', title: 'ATMOSPHERIC DATA', rows: [['Pressure', '<strong>720 Pa</strong> — standard mid-latitude.'], ['Wind speed', '<strong>16 km/h</strong> avg. Gusts to 48 km/h.'], ['Dust', '<strong>1.8 particles/cm³.</strong> Cleaning: every 15 sols.'], ['Daytime temp', '<strong>–20°C.</strong> Suitable for EVA.'], ['Night temp', '<strong>–70°C.</strong> Heating: 58% capacity.']] },
+          { icon: '💧', title: 'WATER & SOIL CHEMISTRY', rows: [['Subsurface water', 'Confirmed at <strong>15–25m depth.</strong> Feasible extraction.'], ['Water quality', 'Phyllosilicate-filtered. Processing required.'], ['Regolith chemistry', 'Iron oxide 18.2%. Phyllosilicates 12.4%. Basaltic 64.8%. <strong>Perchlorates (ClO₄⁻): 0.9%.</strong><span class="note">Safe contact threshold: &lt;0.1%. At 0.9%: direct contact without full suit not safe. Water extraction requires perchlorate filtration stage. Agricultural use: not viable without full soil remediation.</span>']] },
+          { icon: '📡', title: 'COMMUNICATIONS', rows: [['Signal quality', '<strong>72%</strong> — reliable.'], ['EM interference', '<strong>1.8/10</strong> — low.'], ['Relay coverage', '<strong>13 hours/day.</strong>']] }
+        ],
+        rmatrix: [{ l: 'TERRAIN RISK', v: '2/5', c: 'rv-g', d: 'Generally stable crater floor' }, { l: 'WATER ACCESS', v: '3/5', c: 'rv-a', d: 'Confirmed — requires filtration' }, { l: 'SOIL CHEMISTRY', v: '4/5', c: 'rv-r', d: 'Perchlorate above safe contact limit' }, { l: 'POWER', v: '2/5', c: 'rv-g', d: 'Adequate solar' }, { l: 'COMMS', v: '2/5', c: 'rv-g', d: 'Reliable signal' }],
+        rec: "Jezero Crater's former lake bed provides confirmed water access and scientifically significant geology. <strong>Teams must cross-reference soil chemistry data against EVA and resource-use protocols before finalising any recommendation.</strong>",
+        temp: [-69, -21, -44, -72, -71, -19, -43, -70, -68, -22, -45, -73, -72, -21, -44, -70, -69, -18, -43, -71, -71, -22, -46, -72, -70, -20, -44, -71, -68, -19, -45, -73, -71, -21, -43, -70, -69, -20, -44, -72],
+        res: { v: [72, 62, 52, 60, 68], note: '★ Soil Chemistry: perchlorate at 0.9% — EVA protocol required' },
+        terrain: { pts: '0,80 80,80 110,65 135,45 158,76 178,110 195,128 305,128 322,110 342,76 365,45 390,65 420,80 500,80', lz: [195, 305, 128], feats: [{ x: 50, y: 72, a: 'start', t: 'OUTER PLAIN' }, { x: 140, y: 36, a: 'middle', t: 'CRATER RIM' }, { x: 250, y: 118, a: 'middle', t: 'CRATER FLOOR' }, { x: 360, y: 36, a: 'middle', t: 'CRATER RIM' }], info: 'W–E Cross-Section · Jezero Crater ~45km diameter · Vert. exaggeration ×3', extra: '' }
+      },
+      hellas: {
+        sections: [
+          { icon: '⛰', title: 'TERRAIN ANALYSIS', rows: [['Surface type', 'Ancient impact basin floor. Consolidated sedimentary plain.'], ['Gradient', '<strong>0.9°</strong> — excellent.'], ['Landing area', '<strong>18.4 km²</strong>'], ['Compressive strength', '<strong>4.1 MPa</strong> — well above minimum.'], ['Altitude vs datum', '<strong>–7,152m</strong> — lowest site evaluated.']] },
+          { icon: '🌡', title: 'ATMOSPHERIC DATA', rows: [['Pressure', '<strong>1,160 Pa</strong> — highest on planet.'], ['Wind speed', '<strong>8 km/h</strong> — basin shelter.'], ['Dust', '<strong>0.4 particles/cm³</strong> — very low.'], ['Daytime temp', '<strong>+5°C</strong> — only above-zero site.'], ['Night temp', '<strong>–50°C</strong> — warmest nocturnal. Heating: 40% capacity.']] },
+          { icon: '💧', title: 'WATER & RESOURCES', rows: [['Subsurface ice', 'At <strong>8–12m depth.</strong> Periglacial formations.'], ['Water quality', 'Moderate sulfate. Filtration required.']] },
+          { icon: '📡', title: 'COMMUNICATIONS', rows: [['Signal (orbital)', '<strong>76%</strong>'], ['Basin horizon analysis', '<strong>Eastern rim: +4,200m. Western rim: +3,800m above landing site.</strong><span class="note">Earth signal blocked 06:00–14:00 (east rim) and 14:30–20:00 (west rim). Net direct window: ~16 hrs/sol during relay overflight. Emergency comms during blackout: relay-dependent, delay up to 6 hours.</span>'], ['Relay coverage', '12.5 hours/day — partial mitigation.']] }
+        ],
+        rmatrix: [{ l: 'TERRAIN', v: '1/5', c: 'rv-g', d: 'Exceptional surface' }, { l: 'ATMOSPHERE', v: '1/5', c: 'rv-g', d: 'Best conditions on Mars' }, { l: 'WATER', v: '2/5', c: 'rv-g', d: 'Confirmed subsurface' }, { l: 'POWER', v: '3/5', c: 'rv-a', d: 'Reduced solar window' }, { l: 'COMMS', v: '4/5', c: 'rv-r', d: 'Daily blackout window' }],
+        rec: 'Hellas Planitia provides the finest landing and atmospheric conditions on the planet. <strong>Teams must model operational impact of the structured daily communication blackout for emergency response scenarios.</strong>',
+        temp: [-49, 5, -22, -51, -51, 7, -21, -49, -48, 4, -23, -52, -50, 6, -20, -50, -52, 8, -22, -51, -49, 5, -21, -50, -51, 6, -23, -52, -48, 4, -22, -51, -50, 5, -20, -49, -52, 7, -21, -51],
+        res: { v: [62, 48, 78, 95, 38], note: '★ Comms Quality: 8-hour basin-obstruction blackout window per sol' },
+        terrain: { pts: '0,45 65,52 148,80 210,104 250,120 290,104 352,80 435,52 500,45', lz: [200, 300, 115], feats: [{ x: 30, y: 36, a: 'start', t: 'OUTER HIGHLANDS' }, { x: 80, y: 42, a: 'middle', t: 'BASIN RIM' }, { x: 250, y: 110, a: 'middle', t: 'HELLAS FLOOR' }, { x: 420, y: 42, a: 'middle', t: 'BASIN RIM' }], info: 'N–S Cross-Section · Hellas Planitia · Depth 7,152m · Deepest point on Mars', extra: '' }
+      },
+      olympus: {
+        sections: [
+          { icon: '⛰', title: 'TERRAIN ANALYSIS', rows: [['Surface type', 'Shield volcano lower flank. Consolidated basaltic lava.'], ['Gradient', '<strong>2.1°</strong> — acceptable.'], ['Landing area', '<strong>6.8 km²</strong> — solid volcanic rock.'], ['Compressive strength', '<strong>4.9 MPa</strong> — strongest of all sectors.'], ['Seismic log', 'Last 180 sols: <strong>2 events</strong>, Mag. 1.4 and 2.1 (deep origin, minimal risk).']] },
+          { icon: '🌡', title: 'ATMOSPHERIC DATA', rows: [['Altitude at site', '<strong>8,200m above Mars datum.</strong>'], ['Atmospheric pressure', '<strong>72 Pa.</strong><span class="note">Minimum for parachute deployment: 600 Pa. At 72 Pa: parachute non-functional. Retro-rocket descent required. Additional fuel needed: +8.2% above current reserves. Current reserves: 4%. Correction fuel available: 0%.</span>'], ['Dust concentration', '<strong>0.1 particles/cm³</strong> — site is above the dust layer.'], ['Night temp', '<strong>–95°C</strong> — at thermal system rated minimum.']] },
+          { icon: '⚡', title: 'POWER & RESOURCES', rows: [['Solar irradiance', '<strong>680 W/m²</strong> — highest evaluated.'], ['Water', '<strong>None detected.</strong> Nearest: 380km northwest.']] },
+          { icon: '📡', title: 'COMMUNICATIONS', rows: [['Signal', '<strong>82%</strong> — high elevation clear line of sight.'], ['EM interference', '<strong>0.9/10</strong>']] }
+        ],
+        rmatrix: [{ l: 'TERRAIN', v: '1/5', c: 'rv-g', d: 'Strongest surface evaluated' }, { l: 'ATMOSPHERE', v: '5/5', c: 'rv-r', d: '72 Pa — parachute non-functional' }, { l: 'WATER', v: '5/5', c: 'rv-r', d: 'No source within range' }, { l: 'SOLAR POWER', v: '★★★', c: 'rv-g', d: 'Best output on the planet' }, { l: 'COMMS', v: '1/5', c: 'rv-g', d: 'Excellent high-altitude signal' }],
+        rec: 'Olympus Mons has unmatched solar power and surface stability. <strong>Teams must verify descent trajectory and parachute deployment feasibility against available fuel before any recommendation.</strong>',
+        temp: [-93, -36, -64, -96, -95, -34, -63, -95, -94, -35, -65, -97, -93, -33, -62, -95, -95, -37, -64, -96, -94, -35, -63, -95, -93, -34, -65, -97, -95, -36, -62, -96, -94, -35, -64, -95, -93, -33, -63, -96],
+        res: { v: [18, 95, 72, 18, 80], note: '★ Atm. Pressure: 72 Pa — parachute deployment threshold not met' },
+        terrain: { pts: '0,145 80,125 160,100 240,76 310,55 360,40 405,32 432,30 455,38 480,33 500,35', lz: [100, 220, 118], feats: [{ x: 40, y: 136, a: 'start', t: 'BASE PLAIN' }, { x: 155, y: 92, a: 'middle', t: 'LOWER FLANK' }, { x: 340, y: 30, a: 'middle', t: 'UPPER FLANKS' }, { x: 435, y: 22, a: 'middle', t: 'CALDERA RIM' }], info: 'E–W Cross-Section · Olympus Mons · Summit 22,400m above datum', extra: '' }
+      },
+      valles: {
+        sections: [
+          { icon: '⛰', title: 'TERRAIN ANALYSIS', rows: [['Surface', 'Canyon floor bedrock. Consolidated.'], ['Gradient', '<strong>0.6°</strong> — excellent.'], ['Landing area', '<strong>11.2 km²</strong>'], ['Compressive strength', '<strong>3.6 MPa</strong>'], ['Canyon wall stability', 'Wall height: 3,200m (E), 2,800m (W). No active landslide signatures.']] },
+          { icon: '🌡', title: 'ATMOSPHERIC DATA', rows: [['Pressure', '<strong>870 Pa</strong> — elevated.'], ['Wind on floor', '<strong>4 km/h</strong> — exceptional shelter.'], ['Dust', '<strong>0.7 particles/cm³</strong>'], ['Day temp', '<strong>–15°C</strong>'], ['Night temp', '<strong>–80°C.</strong> Heating: 68% capacity.']] },
+          { icon: '📡', title: 'COMMUNICATIONS', rows: [['Signal (orbital)', '<strong>78%</strong>'], ['Canyon wall obstruction', 'East wall (3,200m): blocks Earth signal 06:00–14:00 (8hrs). West wall (2,800m): 14:30–20:30 (6hrs).<span class="note">Net unobstructed direct window per sol: <strong>3.5 hours</strong> (20:30–06:00). Emergency comms outside window: relay-dependent, min. 4-hour delay.</span>']] }
+        ],
+        rmatrix: [{ l: 'TERRAIN', v: '1/5', c: 'rv-g', d: 'Excellent canyon floor' }, { l: 'ATMOSPHERE', v: '1/5', c: 'rv-g', d: 'Sheltered, elevated pressure' }, { l: 'WATER', v: '2/5', c: 'rv-g', d: 'Frost confirmed' }, { l: 'POWER', v: '3/5', c: 'rv-a', d: '8-hr solar window in canyon' }, { l: 'COMMS', v: '5/5', c: 'rv-r', d: '3.5-hr direct window per sol' }],
+        rec: 'Valles Marineris offers outstanding physical shelter and landing conditions. <strong>Teams must model the operational impact of a 3.5-hour daily direct-comms window for emergency response capacity.</strong>',
+        temp: [-78, -16, -47, -81, -80, -14, -46, -79, -79, -15, -48, -82, -81, -13, -45, -80, -78, -17, -47, -81, -80, -15, -46, -79, -79, -14, -48, -82, -81, -16, -47, -80, -78, -15, -45, -81, -80, -14, -46, -79],
+        res: { v: [65, 55, 65, 78, 28], note: '★ Comms Quality: canyon wall obstruction — 3.5 hrs direct window per sol' },
+        terrain: { pts: '0,58 105,58 140,63 165,78 182,108 198,138 210,155 290,155 302,138 318,108 335,78 360,63 395,58 500,58', lz: [210, 290, 155], feats: [{ x: 50, y: 46, a: 'middle', t: 'PLATEAU' }, { x: 152, y: 54, a: 'middle', t: 'CANYON WALL' }, { x: 250, y: 145, a: 'middle', t: 'CANYON FLOOR' }, { x: 348, y: 54, a: 'middle', t: 'CANYON WALL' }, { x: 450, y: 46, a: 'middle', t: 'PLATEAU' }], info: 'N–S Cross-Section · Valles Marineris · Canyon depth ~7km · Width 200km', extra: '' }
+      },
+      arabia: {
+        sections: [
+          { icon: '⛰', title: 'TERRAIN ANALYSIS', rows: [['Surface type', 'Ancient Noachian highland. Heavily eroded. Visually flat.'], ['Apparent gradient', '<strong>1.4°</strong> from orbital scan.'], ['Regolith analysis', 'Fine aeolian sediment.<span class="note">Density: <strong>0.38 g/cm³.</strong> Compressive strength: <strong>0.38 MPa.</strong> Pathfinder minimum: <strong>1.8 MPa.</strong> Strut penetration at landing: 0.8–1.4m. Ground anchoring not viable with standard fixings. Bedrock at 4.2–6.8m depth.</span>'], ['Rock density', 'Extremely low. No usable surface rock within 5km.']] },
+          { icon: '🌡', title: 'ATMOSPHERIC DATA', rows: [['Pressure', '<strong>690 Pa</strong>'], ['Wind', '<strong>20 km/h</strong> avg. Gusts to 62 km/h.'], ['Dust', '<strong>2.1 particles/cm³</strong> — moderate-high.'], ['Night temp', '<strong>–85°C.</strong> Heating: 72% capacity.']] },
+          { icon: '📡', title: 'COMMUNICATIONS', rows: [['Signal', '<strong>79%</strong>'], ['Relay coverage', '<strong>14 hours/day</strong>']] }
+        ],
+        rmatrix: [{ l: 'TERRAIN RISK', v: '4/5', c: 'rv-r', d: 'Compressive strength: 0.38 vs 1.8 required' }, { l: 'ATMOSPHERE', v: '2/5', c: 'rv-g', d: 'Standard conditions' }, { l: 'WATER', v: '4/5', c: 'rv-r', d: 'Very deep estimate, uncertain' }, { l: 'POWER', v: '2/5', c: 'rv-g', d: 'Moderate solar' }, { l: 'COMMS', v: '2/5', c: 'rv-g', d: 'Reliable signal' }],
+        rec: 'Arabia Terra has reliable communications and adequate solar, but <strong>teams must verify regolith compressive strength data against Pathfinder strut specifications. This is mission-critical.</strong>',
+        temp: [-83, -26, -54, -86, -85, -24, -53, -84, -84, -25, -55, -87, -86, -23, -52, -85, -83, -27, -54, -86, -85, -25, -53, -84, -84, -24, -55, -87, -86, -26, -54, -85, -83, -25, -52, -86, -85, -24, -53, -84],
+        res: { v: [42, 58, 22, 55, 74], note: '★ Ground Stability: regolith compressive strength below minimum strut spec' },
+        terrain: { pts: '0,70 65,62 128,73 192,58 258,68 322,60 388,71 450,63 500,68', lz: [155, 345, 65], feats: [{ x: 250, y: 48, a: 'middle', t: 'HIGHLAND PLATEAU' }, { x: 80, y: 50, a: 'middle', t: 'RIDGE' }, { x: 420, y: 50, a: 'middle', t: 'RIDGE' }], info: 'W–E Cross-Section · Arabia Terra · Ancient Noachian highland', extra: '' }
+      },
+      vastitas: {
+        sections: [
+          { icon: '⛰', title: 'TERRAIN ANALYSIS', rows: [['Surface', 'Periglacial polar plain. Permafrost base.'], ['Gradient', '<strong>0.5°</strong> — flattest of all sectors.'], ['Landing area', '<strong>22.1 km²</strong> — largest evaluated.'], ['Compressive strength', '<strong>3.2 MPa</strong> — permafrost provides solid base.']] },
+          { icon: '🌡', title: 'THERMAL DATA', rows: [['Day temp', '<strong>–42°C</strong>'], ['Night temp', '<strong>–118°C to –124°C</strong><span class="note">Thermal system rated minimum: <strong>–95°C.</strong> At –120°C: heating power required = <strong>340% of system maximum.</strong> Polar night: 11 hours/sol. Time to critical internal temp at max heating: ~3.5 hours.</span>'], ['Solar irradiance', '<strong>380 W/m²</strong> — lowest, polar angle.'], ['Power budget', 'Daily solar: 2.1 MWh. Required nightly heating: <strong>8.4 MWh. Deficit: 6.3 MWh/sol. No backup power in Pathfinder manifest.</strong>']] },
+          { icon: '💧', title: 'WATER & RESOURCES', rows: [['Ice depth', '<strong>1–2m</strong> — shallowest of all sectors.'], ['Volume', 'Vast polar deposits extending >1,000km.'], ['Purity', 'Very high — minimal processing required.']] },
+          { icon: '📡', title: 'COMMUNICATIONS', rows: [['Signal quality', '<strong>97%</strong> — highest on planet.'], ['Relay coverage', '<strong>22 hours/day</strong>'], ['Emergency beacon', 'Guaranteed transmission, no relay dependency.']] }
+        ],
+        rmatrix: [{ l: 'TERRAIN', v: '1/5', c: 'rv-g', d: 'Largest, flattest zone' }, { l: 'WATER', v: '1/5', c: 'rv-g', d: 'Best water access on Mars' }, { l: 'NIGHT SURVIVAL', v: '5/5', c: 'rv-r', d: '340% power deficit for heating' }, { l: 'SOLAR POWER', v: '5/5', c: 'rv-r', d: '6.3 MWh deficit per sol' }, { l: 'COMMS', v: '★★★', c: 'rv-g', d: 'Best signal on the planet' }],
+        rec: 'Vastitas Borealis leads on communications and water access. <strong>Teams must complete a full nocturnal thermal energy budget against available power — the deficit figure is not negotiable.</strong>',
+        temp: [-118, -43, -80, -121, -120, -41, -79, -119, -119, -42, -81, -122, -121, -40, -78, -120, -118, -44, -80, -121, -120, -42, -79, -119, -119, -41, -81, -122, -121, -43, -80, -120, -118, -42, -78, -121, -120, -41, -79, -119],
+        res: { v: [95, 32, 68, 50, 97], note: '★ Solar Power: polar angle insufficient to cover nocturnal heating demand' },
+        terrain: { pts: '0,88 100,89 200,90 300,90 400,89 500,88', lz: [150, 350, 89], feats: [{ x: 250, y: 78, a: 'middle', t: 'POLAR PLAIN' }, { x: 250, y: 124, a: 'middle', t: 'PERMAFROST LAYER (1–2m depth)' }], info: 'E–W Cross-Section · Vastitas Borealis · Northern polar plain', extra: '<rect x="0" y="90" width="500" height="8" fill="rgba(79,195,247,0.12)" stroke="rgba(79,195,247,0.25)" stroke-width="0.5" stroke-dasharray="3,2"/><text x="4" y="102" fill="rgba(79,195,247,0.4)" font-size="7" font-family="monospace">▓ PERMAFROST LAYER (1–2m depth)</text>' }
+      },
+      omega: {
+        sections: [
+          { icon: '⚠', title: 'DATALINK UNSTABLE', rows: [['Status', '<span class="hi">Packet loss 42%.</span> Restoring...'], ['Source', 'Auxiliary low-gain antenna.'], ['Encryption', 'Standard-Alpha.']] },
+          { icon: '⛰', title: 'TERRAIN ESTIMATE', rows: [['Surface', 'Consolidated Regolith.'], ['Gradient', '<strong>~0.4° (Exceptional)</strong>'], ['Landing Area', '<strong>>100 km² (Projected)</strong>'], ['Seismic', '<strong>Sensor Error (Code 0x99).</strong>']] },
+          { icon: '🌡', title: 'ATMOSPHERIC DATA', rows: [['Pressure', '<strong>745 Pa (Variable)</strong>'], ['Temp', '<strong>–15°C (Intermittent)</strong>'], ['Wind', '<strong>12 km/h (Est.)</strong>']] },
+          { icon: '⚡', title: 'RESOURCES', rows: [['Solar', '<strong>590 W/m² (High Confidence)</strong>'], ['Spectrometry', 'Basalt/Olivine detected. <span class="note">Hydration signatures: UNCONFIRMED.</span>']] }
+        ],
+        rmatrix: [{ l: 'TERRAIN', v: '9/10', c: 'rv-g', d: 'Optimal (Est.)' }, { l: 'ATMOSPHERE', v: '7/10', c: 'rv-g', d: 'Stable' }, { l: 'WATER', v: '?', c: 'rv-a', d: 'No Spectral Data' }, { l: 'POWER', v: '8/10', c: 'rv-g', d: 'High Output' }, { l: 'COMMS', v: 'UNSTABLE', c: 'rv-r', d: 'Link Critical' }],
+        rec: '<strong>WARNING: DATA INCOMPLETE.</strong><br>Available telemetry suggests this sector is a <strong>near-perfect landing site</strong> (flat, high power, good pressure). However, the seismic sensor is returning an error code and water data is missing.<br><strong>High reward, high unknown risk.</strong>',
+        temp: [-15, -18, -14, -16, -15, -65, -70, -68, -62, -15, -14, -16, -18, -15, -66, -72, -68, -64, -15, -14, -16, -15, -18, -65, -70, -68, -62, -15, -14, -16, -18, -15, -66, -72, -68, -64, -15, -14, -16, -15],
+        res: { v: [10, 85, 90, 75, 40], note: '★ Solar & Terrain appear OPTIMAL. Water data missing.' },
+        terrain: { pts: '0,100 100,100 200,100 300,100 400,100 500,100', lz: [100, 400, 100], feats: [{ x: 250, y: 80, a: 'middle', t: 'FLAT PLAIN (PROJECTED)' }, { x: 250, y: 120, a: 'middle', t: 'SEISMIC DATA CORRUPTED' }], info: 'SCAN VALIDATION FAILED · TOPOGRAPHY ESTIMATED', extra: '' }
+      }
+    };
+
+    // ══════════════════════════════════════════════════
+    //  STATE
+    // ══════════════════════════════════════════════════
+    let currentSector = null;
+    let activeTempChart = null;
+    let activeResChart = null;
+    window.__claims = {};
+
+    // ══════════════════════════════════════════════════
+    //  RENDER GRID
+    // ══════════════════════════════════════════════════
+    function renderGrid(claims) {
+      const grid = document.getElementById('sector-grid');
+      grid.innerHTML = '';
+
+      // 1. RENDER 7 SECTORS
+      Object.keys(TEASER).forEach(key => {
+        const t = TEASER[key];
+        const claimedBy = claims[key];
+        const card = document.createElement('div');
+        card.className = 'sector-card ' + (claimedBy ? 'occupied' : 'available');
+        card.innerHTML = `
+      ${claimedBy ? `<div class="occ-stamp">OCCUPIED</div>` : ''}
+      <div class="card-top" onclick="showSector('${key}')">
+        <div class="card-icon">${t.icon}</div>
+        <div class="card-name">${t.name}</div>
+        <div class="card-loc">📍 ${t.loc}</div>
+      </div>
+      <div class="card-body">
+        <div class="card-stats">
+          ${t.stats.map(s => `<div class="cs-row"><span class="cs-lbl">${s.l}</span><span class="cs-val ${s.c}">${s.v}</span></div>`).join('')}
+        </div>
+        <div class="card-hook">${t.hook}</div>
+      </div>
+      <div class="card-footer">
+        ${claimedBy
+            ? `<div class="card-footer-occ">⛔ CLAIMED — ${claimedBy}</div>`
+            : `<div class="card-footer-avail">● AVAILABLE</div>
+             <button class="explore-btn" onclick="showSector('${key}')">EXPLORE & CLAIM →</button>`}
+      </div>`;
+        grid.appendChild(card);
+      });
+
+      // 2. RENDER 8TH CARD: VOTING TERMINAL
+      const isVotingOpen = window.__votingState;
+      const voteCard = document.createElement('div');
+      // If open, style as active/green. If closed, style as locked/dim.
+      voteCard.className = 'sector-card ' + (isVotingOpen ? 'available' : 'occupied');
+      voteCard.style.borderColor = isVotingOpen ? 'var(--green)' : 'rgba(255,255,255,0.1)';
+      voteCard.style.background = isVotingOpen ? 'rgba(46,204,113,0.05)' : 'rgba(255,255,255,0.02)';
+
+      const statusText = isVotingOpen ? 'VOTING CHANNEL OPEN' : 'CHANNEL LOCKED';
+      const statusColor = isVotingOpen ? 'var(--green)' : 'var(--text-dim)';
+      const icon = isVotingOpen ? '🗳' : '🔒';
+
+      voteCard.innerHTML = `
+        <div class="card-top" onclick="${isVotingOpen ? 'openVoteModal()' : ''}" style="cursor:${isVotingOpen ? 'pointer' : 'default'}">
+            <div class="card-icon" style="color:${statusColor}">${icon}</div>
+            <div class="card-name" style="color:${statusColor}">MISSION VOTE</div>
+            <div class="card-loc" style="color:${statusColor}">SOL 10 — FINAL DECISION</div>
+        </div>
+        <div class="card-body" style="display:flex;flex-direction:column;justify-content:center;align-items:center;text-align:center;">
+             <div style="font-family:'Orbitron';font-size:12px;color:${statusColor};letter-spacing:2px;margin-bottom:12px;">
+                ${statusText}
+             </div>
+             <div style="font-family:'Share Tech Mono';font-size:10px;color:var(--text-dim);line-height:1.6;">
+                ${isVotingOpen
+          ? "Mission Command is accepting recommendation packets. Submit your top 3 sectors."
+          : "Waiting for Mission Command to open the polling frequency..."}
+             </div>
+        </div>
+        <div class="card-footer">
+            ${isVotingOpen
+          ? `<button class="explore-btn" onclick="openVoteModal()" style="color:var(--green);border-color:var(--green);">ENTER VOTE →</button>`
+          : `<div class="card-footer-avail" style="color:var(--text-dim);">● STANDBY</div>`}
+        </div>
+      `;
+      grid.appendChild(voteCard);
+    }
+
+    function updateBanner(claims) {
+      const n = Object.keys(claims).length;
+      const banner = document.getElementById('phase-banner');
+      if (n >= 6) {
+        banner.style.cssText = 'background:linear-gradient(90deg,#1a0808,#220d0d,#1a0808);border-color:rgba(232,64,64,.2);color:var(--red);padding:8px 24px;text-align:center;font-family:Orbitron,monospace;font-size:9px;letter-spacing:3px;';
+        banner.textContent = '⚠ ALL SECTORS CLAIMED · ONE SECTOR UNCLAIMED · ANALYSIS PHASE BEGINS NOW';
+      } else {
+        banner.style.cssText = 'background:linear-gradient(90deg,#0a1a10,#0f2018,#0a1a10);border-color:rgba(46,204,113,.2);color:var(--green);padding:8px 24px;text-align:center;font-family:Orbitron,monospace;font-size:9px;letter-spacing:3px;';
+        banner.textContent = `PHASE 1 — SECTOR SELECTION OPEN · ${6 - n} SECTOR(S) REMAINING · CLAIM YOUR SECTOR`;
+      }
+    }
+
+    // ══════════════════════════════════════════════════
+    //  SECTOR DETAIL (teaser + claim zone)
+    // ══════════════════════════════════════════════════
+    function showSector(key) {
+      currentSector = key;
+      const t = TEASER[key];
+      const claims = window.__claims || {};
+      const claimedBy = claims[key];
+      let html = `
+    <div class="dv-header fu">
+      <div class="dv-lbl">PRELIMINARY SURVEY — OPEN ACCESS DATA</div>
+      <div class="dv-title">${t.icon} ${t.name}</div>
+      <div class="dv-loc">📍 ${t.loc}</div>
+    </div>
+    <div class="pills fu">${t.pills.map(p => `<span class="pill ${p.c}">${p.t}</span>`).join('')}</div>
+    <div class="dblock fu">
+      <div class="dbhdr"><span>📊</span>PRELIMINARY DATA — ALL TEAMS</div>
+      <div class="dbbody"><table class="dtable">
+        ${t.stats.map(s => `<tr><td>${s.l}</td><td><strong>${s.v}</strong></td></tr>`).join('')}
+      </table></div>
+    </div>
+    <div class="dblock fu">
+      <div class="dbhdr"><span>📋</span>MISSION ANALYST NOTE</div>
+      <div class="dbbody" style="font-family:'Share Tech Mono',monospace;font-size:12px;line-height:1.8;color:var(--text-dim);">
+        ${t.hook}<br><br>
+        <span style="color:var(--amber-dim);font-size:10px;">⚠ ${t.advisory}</span>
+      </div>
+    </div>
+    <div class="preview-lock fu">
+      <div class="pl-txt">
+        <span>CLASSIFIED SECTOR BRIEFING — LOCKED</span><br>
+        Full data: terrain analysis · atmospheric profile · risk matrix · water & resource data · comms window · interactive charts.<br><br>
+        Claim this sector to receive your team access code. Enter the code to unlock the full briefing.
+      </div>
+    </div>`;
+
+      if (claimedBy) {
+        html += `
+      <div class="claim-zone occ fu">
+        <div class="claim-title r">⛔ SECTOR SECURED BY ${claimedBy}</div>
+        <div class="claim-desc">This sector is locked. Only members of <strong>${claimedBy}</strong> with the access code may proceed.</div>
+        <button onclick="openCodeModal('${key}')" class="claim-btn" style="border-color:var(--amber);color:var(--amber);background:rgba(240,165,0,.1);">ENTER ACCESS CODE →</button>
+        <button onclick="goHome()" class="unlock-link" style="margin-top:12px;display:inline-block;">← Back</button>
+      </div>`;
+      } else {
+        html += `
+      <div class="claim-zone fu">
+        <div class="claim-title">⚑ BLOCK SECTOR — CLAIM FOR YOUR TEAM</div>
+        <div class="claim-desc">Blocking this sector locks it to your team. Other teams will be unable to claim it.<br>You will immediately receive an access code for the classified briefing.</div>
+        <select class="team-sel" id="team-sel" onchange="document.getElementById('claim-team-err').style.display='none'">
+          <option value="">— SELECT YOUR TEAM NUMBER —</option>
+          ${[1, 2, 3, 4, 5, 6].map(n => `<option value="TEAM ${n}">TEAM ${n}</option>`).join('')}
+        </select>
+        <div id="claim-team-err" style="display:none;color:var(--red);font-family:'Share Tech Mono',monospace;font-size:11px;margin-bottom:12px;line-height:1.6;max-width:380px;margin-left:auto;margin-right:auto;"></div>
+        <button class="claim-btn" id="claim-btn" onclick="doClaim()">⚑ BLOCK THIS SECTOR</button>
+      </div>
+      <div style="margin-top:10px;text-align:center;">
+        <button class="unlock-link" onclick="openCodeModal('${key}')">Already have a code? Unlock full data →</button>
+      </div>`;
+      }
+
+      document.getElementById('detail-content').innerHTML = html;
+      document.getElementById('view-landing').style.display = 'none';
+      document.getElementById('view-detail').style.display = 'block';
+      window.scrollTo(0, 0);
+    }
+
+    async function doClaim() {
+      const teamSel = document.getElementById('team-sel');
+      const team = teamSel ? teamSel.value : '';
+      if (!team) { teamSel.style.borderColor = 'var(--red)'; return; }
+
+      // ── Bug 2 fix: prevent one team claiming multiple sectors ──
+      const existingClaims = window.__claims || {};
+      const alreadyOwns = Object.entries(existingClaims).find(([sec, t]) => t === team);
+      if (alreadyOwns) {
+        const [ownedKey] = alreadyOwns;
+        const ownedName = TEASER[ownedKey] ? TEASER[ownedKey].name : ownedKey;
+        const errEl = document.getElementById('claim-team-err');
+        if (errEl) {
+          errEl.textContent = `⚠ ${team} has already claimed ${ownedName}. Each team can only claim one sector.`;
+          errEl.style.display = 'block';
+        }
+        return;
+      }
+
+      const btn = document.getElementById('claim-btn');
+      btn.disabled = true;
+      btn.textContent = 'CLAIMING…';
+      const result = await window.firebaseClaim(currentSector, team);
+      if (result.error === 'already_claimed') {
+        btn.textContent = '⛔ SECTOR JUST TAKEN — PICK ANOTHER';
+        btn.disabled = false;
+        return;
+      }
+      // ── Bug 1 fix: store which sector this team claimed so we can jump straight in ──
+      const claimedSectorKey = currentSector;
+      const code = CODES[claimedSectorKey];
+      const sName = TEASER[claimedSectorKey].name;
+      document.getElementById('mc-sub').textContent = `${team} has claimed ${sName}.`;
+      document.getElementById('mc-code').textContent = code;
+      // Store for use when modal closes
+      document.getElementById('modal-claimed').dataset.sectorKey = claimedSectorKey;
+      document.getElementById('modal-claimed').classList.add('open');
+
+      // Persist identity for voting later
+      localStorage.setItem('pathfinder_my_team', team);
+      localStorage.setItem('pathfinder_my_sector', claimedSectorKey);
+    }
+
+    function closeClaimModal() {
+      const modal = document.getElementById('modal-claimed');
+      const key = modal.dataset.sectorKey;
+      modal.classList.remove('open');
+      // Go straight into the full briefing — no code re-entry needed
+      if (key) {
+        currentSector = key;
+        showFullDetail(key);
+      } else {
+        goHome();
+      }
+    }
+
+    function goHome() {
+      document.getElementById('view-detail').style.display = 'none';
+      document.getElementById('view-landing').style.display = 'flex';
+      currentSector = null;
+      window.scrollTo(0, 0);
+    }
+
+    // ══════════════════════════════════════════════════
+    //  CODE MODAL → FULL DATA
+    // ══════════════════════════════════════════════════
+    let pendingSector = null;
+
+    function openCodeModal(key) {
+      pendingSector = key;
+      document.getElementById('mc-sector').textContent = TEASER[key].name;
+      document.getElementById('code-input').value = '';
+      document.getElementById('code-error').style.display = 'none';
+      document.getElementById('modal-code').classList.add('open');
+      setTimeout(() => document.getElementById('code-input').focus(), 120);
+    }
+    function closeCodeModal() {
+      document.getElementById('modal-code').classList.remove('open');
+      pendingSector = null;
+    }
+    function validateCode() {
+      const input = document.getElementById('code-input').value.toUpperCase().trim();
+      const teamSel = document.getElementById('code-team-sel');
+      const selectedTeam = teamSel.value;
+      const key = pendingSector;
+      const claims = window.__claims || {};
+      const owner = claims[key];
+
+      const errEl = document.getElementById('code-error');
+
+      // 1. Check if team is selected
+      if (!selectedTeam) {
+        teamSel.style.borderColor = 'var(--red)';
+        return;
+      } else {
+        teamSel.style.borderColor = 'var(--border)';
+      }
+
+      // 2. Check if code is correct (Basic check)
+      if (input !== CODES[key] && key !== 'omega') { // Allow Omega to bypass standard code check if needed, or define a code
+        if (input !== 'OMEGA-00' && input !== CODES[key]) { // Let's simplify: Omega has a specific code, or we treat it special
+          errEl.textContent = '⚠ ACCESS DENIED — INVALID CODE';
+          errEl.style.display = 'block';
+          document.getElementById('code-input').value = '';
+          document.getElementById('code-input').focus();
+          return;
+        }
+      }
+
+      // 3. STRICT SECURITY: Check if selected team OWNS this sector
+      if (owner && owner !== selectedTeam) {
+        errEl.textContent = `⛔ SECURITY ALERT: ${selectedTeam} is not authorized for this sector. Claimed by ${owner}.`;
+        errEl.style.display = 'block';
+        return;
+      }
+
+      // 5. SUCCESS: Store Identity & Unlock
+      localStorage.setItem('pathfinder_my_team', selectedTeam);
+      localStorage.setItem('pathfinder_my_sector', key); // Store sector so we know who they are
+
+      closeCodeModal();
+      showFullDetail(key);
+    }
+    document.getElementById('code-input').addEventListener('keydown', e => {
+      if (e.key === 'Enter') validateCode();
+      if (e.key === 'Escape') closeCodeModal();
+    });
+    document.getElementById('modal-code').addEventListener('click', e => {
+      if (e.target === document.getElementById('modal-code')) closeCodeModal();
+    });
+
+    // ══════════════════════════════════════════════════
+    //  FULL DETAIL VIEW
+    // ══════════════════════════════════════════════════
+    function showFullDetail(key) {
+      const t = TEASER[key];
+      const f = FULL[key];
+      document.getElementById('view-landing').style.display = 'none';
+      document.getElementById('view-detail').style.display = 'block';
+      let html = `
+    <div class="dv-header fu">
+      <div class="dv-lbl">CLASSIFIED FULL BRIEFING — TEAM ACCESS</div>
+      <div class="dv-title">${t.icon} ${t.name}</div>
+      <div class="dv-loc">📍 ${t.loc}</div>
+    </div>
+    <div class="pills fu">${t.pills.map(p => `<span class="pill ${p.c}">${p.t}</span>`).join('')}</div>`;
+      f.sections.forEach(sec => {
+        html += `<div class="dblock fu"><div class="dbhdr"><span>${sec.icon}</span>${sec.title}</div><div class="dbbody"><table class="dtable">${sec.rows.map(([l, v]) => `<tr><td>${l}</td><td>${v}</td></tr>`).join('')}</table></div></div>`;
+      });
+      html += `<div class="dblock fu"><div class="dbhdr"><span>⚠</span>RISK ASSESSMENT MATRIX</div><div class="dbbody"><div class="rmatrix">${f.rmatrix.map(r => `<div class="ritem"><div class="ri-lbl">${r.l}</div><div class="ri-val ${r.c}">${r.v}</div><div class="ri-desc">${r.d}</div></div>`).join('')}</div></div></div>`;
+      html += `<div class="dblock fu"><div class="dbhdr"><span>🛰</span>MISSION COMMAND — ANALYST SUMMARY</div><div class="dbbody"><div class="rec-box"><div class="rec-hdr">RECOMMENDATION</div><div class="rec-txt">${f.rec}</div></div></div></div>`;
+      html += `<div class="chart-block fu"><div class="chart-hdr"><span>⛰</span>TERRAIN CROSS-SECTION</div><div class="chart-wrap">${buildSVG(f.terrain)}</div><div class="terrain-info">ℹ ${f.terrain.info}</div></div>`;
+      html += `<div class="chart-block fu"><div class="chart-hdr"><span>🌡</span>THERMAL PROFILE — 10 SOL CYCLE</div><div class="chart-wrap" style="height:260px;"><canvas id="tempChart"></canvas></div><div class="chart-note">— — Pathfinder thermal system rated minimum: –95°C sustained</div></div>`;
+      html += `<div class="chart-block fu"><div class="chart-hdr"><span>📊</span>RESOURCE VIABILITY INDEX</div><div class="chart-wrap" style="height:220px;"><canvas id="resChart"></canvas></div><div class="chart-note">${f.res.note} · Threshold at 50 = minimum viable</div></div>`;
+      html += `<div class="mandate fu"><div class="mandate-title">YOUR TEAM'S MISSION</div><div class="mandate-txt"><strong>Your task is not to find a perfect solution. Your task is to defend the most viable one.</strong><br><br>Analyse all data carefully. Build your case. One member of your team has received additional classified information about this sector. You have until the Council begins.<br><br><strong>Fuel: 4%. One attempt. Make it count.</strong></div></div>`;
+      html += `<div class="stamp">PATHFINDER — ${t.name} — CLASSIFIED BRIEFING</div>`;
+      document.getElementById('detail-content').innerHTML = html;
+      window.scrollTo(0, 0);
+      requestAnimationFrame(() => {
+        if (activeTempChart) { activeTempChart.destroy(); activeTempChart = null; }
+        if (activeResChart) { activeResChart.destroy(); activeResChart = null; }
+        activeTempChart = buildTempChart(f.temp);
+        activeResChart = buildResChart(f.res);
+      });
+    }
+
+    function buildSVG(ter) {
+      const [lzX1, lzX2, lzY] = ter.lz;
+      const lcx = (lzX1 + lzX2) / 2;
+      return `<svg viewBox="0 0 500 160" xmlns="http://www.w3.org/2000/svg" style="width:100%;height:auto;display:block;border:1px solid rgba(255,255,255,.04);">
+    <defs><pattern id="tg" width="50" height="40" patternUnits="userSpaceOnUse"><path d="M50 0 L0 0 0 40" fill="none" stroke="rgba(255,255,255,.03)" stroke-width=".8"/></pattern></defs>
+    <rect width="500" height="160" fill="#060c14"/>
+    <rect width="500" height="160" fill="url(#tg)"/>
+    <line x1="0" y1="80" x2="500" y2="80" stroke="rgba(240,165,0,.1)" stroke-width=".8" stroke-dasharray="5,4"/>
+    <text x="4" y="78" fill="rgba(240,165,0,.28)" font-size="7" font-family="monospace" letter-spacing="1">MARS DATUM (0m)</text>
+    ${ter.extra}
+    <polygon points="${ter.pts} 500,160 0,160" fill="#1e1208"/>
+    <polyline points="${ter.pts}" fill="none" stroke="#f0a500" stroke-width="1.5"/>
+    <rect x="${lzX1}" y="0" width="${lzX2 - lzX1}" height="160" fill="rgba(240,165,0,.04)"/>
+    <line x1="${lzX1}" y1="0" x2="${lzX1}" y2="160" stroke="rgba(240,165,0,.3)" stroke-width=".8" stroke-dasharray="4,3"/>
+    <line x1="${lzX2}" y1="0" x2="${lzX2}" y2="160" stroke="rgba(240,165,0,.3)" stroke-width=".8" stroke-dasharray="4,3"/>
+    <text x="${lcx}" y="11" fill="rgba(240,165,0,.55)" font-size="7" font-family="monospace" text-anchor="middle">▼ LANDING ZONE ▼</text>
+    ${ter.feats.map(f => `<text x="${f.x}" y="${f.y}" fill="rgba(200,220,240,.4)" font-size="8" font-family="monospace" text-anchor="${f.a || 'middle'}">${f.t}</text>`).join('')}
+  </svg>`;
+    }
+
+    function buildTempChart(data) {
+      const ctx = document.getElementById('tempChart'); if (!ctx) return null;
+      Chart.defaults.color = '#4a6a7a'; Chart.defaults.font.family = "'Share Tech Mono',monospace"; Chart.defaults.font.size = 10;
+      const labels = Array.from({ length: 40 }, (_, i) => i % 4 === 1 ? `Sol ${Math.floor(i / 4) + 1}` : '');
+      return new Chart(ctx, { type: 'line', data: { labels, datasets: [{ label: 'Temperature (°C)', data, borderColor: '#f0a500', backgroundColor: 'rgba(240,165,0,.06)', borderWidth: 1.5, pointRadius: 1.5, pointHoverRadius: 4, tension: .4, fill: true }, { label: 'Thermal System Limit (–95°C)', data: Array(40).fill(-95), borderColor: 'rgba(232,64,64,.55)', borderDash: [6, 3], borderWidth: 1.2, pointRadius: 0, fill: false }] }, options: { responsive: true, maintainAspectRatio: false, interaction: { mode: 'index', intersect: false }, plugins: { legend: { display: true, position: 'top', labels: { color: '#4a6a7a', font: { size: 9 }, boxWidth: 16, padding: 12 } }, tooltip: { backgroundColor: 'rgba(10,18,25,.9)', borderColor: 'rgba(240,165,0,.3)', borderWidth: 1, titleColor: '#f0a500', bodyColor: '#b8ccd8', callbacks: { label: c => `${c.dataset.label}: ${c.parsed.y}°C` } } }, scales: { x: { grid: { color: 'rgba(255,255,255,.04)' }, ticks: { color: '#4a6a7a', maxRotation: 0 } }, y: { grid: { color: 'rgba(255,255,255,.04)' }, ticks: { color: '#4a6a7a', callback: v => v + '°C' }, title: { display: true, text: 'Temperature (°C)', color: '#4a6a7a', font: { size: 9 } } } } } });
+    }
+
+    function buildResChart(res) {
+      const ctx = document.getElementById('resChart'); if (!ctx) return null;
+      const bgC = res.v.map(v => v >= 70 ? 'rgba(46,204,113,.75)' : v >= 40 ? 'rgba(240,165,0,.75)' : 'rgba(232,64,64,.75)');
+      const brC = res.v.map(v => v >= 70 ? '#2ecc71' : v >= 40 ? '#f0a500' : '#e84040');
+      return new Chart(ctx, { type: 'bar', data: { labels: ['Water Resources', 'Solar Power', 'Ground Stability', 'Atm. Pressure', 'Comms Quality'], datasets: [{ label: 'Viability Index (0–100)', data: res.v, backgroundColor: bgC, borderColor: brC, borderWidth: 1.5, borderRadius: 2 }, { label: 'Minimum Viable (50)', data: Array(5).fill(50), type: 'line', borderColor: 'rgba(232,64,64,.5)', borderDash: [5, 3], borderWidth: 1.2, pointRadius: 0, backgroundColor: 'transparent' }] }, options: { indexAxis: 'y', responsive: true, maintainAspectRatio: false, plugins: { legend: { display: true, position: 'top', labels: { color: '#4a6a7a', font: { size: 9 }, boxWidth: 14, padding: 10 } }, tooltip: { backgroundColor: 'rgba(10,18,25,.9)', borderColor: 'rgba(240,165,0,.3)', borderWidth: 1, titleColor: '#f0a500', bodyColor: '#b8ccd8' } }, scales: { x: { min: 0, max: 100, grid: { color: 'rgba(255,255,255,.04)' }, ticks: { color: '#4a6a7a' }, title: { display: true, text: 'Viability Index (0=critical · 100=optimal)', color: '#4a6a7a', font: { size: 9 } } }, y: { grid: { display: false }, ticks: { color: '#b8ccd8', font: { size: 10 } } } } } });
+    }
+
+    // ══════════════════════════════════════════════════
+    //  OMEGA — Teacher: Ctrl+Shift+O
+    // ══════════════════════════════════════════════════
+    document.addEventListener('keydown', e => {
+      if (e.ctrlKey && e.shiftKey && e.key === 'O') { e.preventDefault(); fireOmega(); }
+      if (e.key === 'Escape') closeOmega();
+    });
+
+    function getOmegaTranscript(name, loc) {
+      return [
+        { t: 'gap' }, { t: 'dim', x: '──────────────────────────────────────────────────────────────' },
+        { t: 'am', x: 'TRANSMISSION RECEIVED: SOL 10 — 14:47 MARS LOCAL TIME' },
+        { t: 'dim', x: '──────────────────────────────────────────────────────────────' }, { t: 'gap' },
+        { t: 'dim', x: 'ORIGIN:         MISSION COMMAND — DEEP SURVEY DIVISION' },
+        { t: 'dim', x: 'CLASSIFICATION: PRIORITY ALPHA' },
+        { t: 'dim', x: 'RE:             ADDITIONAL LANDING SITE — LATE IDENTIFICATION' }, { t: 'gap' },
+        { t: 'big', x: name || 'SECTOR OMEGA' }, { t: 'am', x: loc || 'UNKNOWN LOCATION' }, { t: 'gap' },
+        { t: 'n', x: 'Mission Command advises that a seventh landing site was identified' },
+        { t: 'n', x: '48 hours ago and has now cleared preliminary analysis.' },
+        { t: 'n', x: 'This sector was not included in standard briefing packs.' }, { t: 'gap' },
+        { t: 'dim', x: `── ${name} — FINAL CLASSIFIED ANALYSIS ──────────────────` },
+        { t: 'n', x: 'Surface gradient  . . . . . .  0.2°   (EXCELLENT)' },
+        { t: 'n', x: 'Daytime temperature . . . . .  –5°C   (EQUATORIAL MAXIMUM)' },
+        { t: 'n', x: 'Subsurface Water  . . . . . .  CONFIRMED (SHALLOW RESERVOIR)' },
+        { t: 'n', x: 'Atmospheric pressure  . . . .  850 Pa (HIGH STABILITY)' },
+        { t: 'n', x: 'Solar irradiance  . . . . . .  600 W/m²  (MAXIMUM)' },
+        { t: 'n', x: 'Resources . . . . . . . . . .  NITROGEN-RICH / TOXIN-FREE' },
+        { t: 'dim', x: '── CLASSIFIED ANNEX — DEEP SEISMIC SCAN ──────────────────────' },
+        { t: 'hi', x: '✓  SEISMIC INTEGRITY VERIFIED' }, { t: 'gap' },
+        { t: 'n', x: 'Subsurface void chambers:   NONE DETECTED.' },
+        { t: 'n', x: 'Bedrock stability:          CLASS A (HIGH DENSITY)' }, { t: 'gap' },
+        { t: 'hi', x: 'Projected outcome on landing: 98.4% SUCCESS RATE.' },
+        { t: 'hi', x: 'Mission viability:          HIGH PRIORITY.' },
+        { t: 'hi', x: 'Crew survival probability:  96.8%.' }, { t: 'gap' },
+        { t: 'dim', x: 'Why was this sector ignored? Preliminary data was overly conservative.' },
+        { t: 'dim', x: 'This is the safest, most resource-rich landing site on Mars.' }, { t: 'gap' },
+        { t: 'verdict' }
+      ];
+    }
+
+    const REAL_OMEGA_TEASER = {
+      icon: '★', name: 'AMAZONIS PLANITIA', loc: '6.9°N / 158.3°E — Amazonis Planitia',
+      stats: [{ l: 'SURFACE GRADIENT', v: '0.4°', c: 'good' }, { l: 'SOLAR IRRADIANCE', v: '600 W/m²', c: 'good' }, { l: 'SIGNAL QUALITY', v: '88%', c: 'good' }, { l: 'WIND SPEED', v: '10 km/h', c: 'good' }, { l: 'RISK ASSESS.', v: 'LOW', c: 'good' }],
+      pills: [{ t: 'CONDITIONS: OPTIMAL', c: 'pg' }, { t: 'RISK: MINIMAL', c: 'pg' }, { t: 'DATA: VERIFIED', c: 'pg' }],
+      hook: '<span class="hi" style="color:var(--green)">OPTIMAL LANDING CONDITIONS VERIFIED.</span> Flattest terrain evaluated. Excellent solar and comms profile. No surface anomalies detected on orbital scan.',
+      advisory: 'Sensor calibration confirmed.'
+    };
+
+    const REAL_OMEGA_FULL = {
+      sections: [
+        { icon: '⛰', title: 'TERRAIN ANALYSIS', rows: [['Surface type', 'Consolidated bedrock — <strong>Class A</strong> stability.'], ['Landing gradient', '<strong>0.2°</strong> — Excellent.'], ['Usable landing area', '<strong>140 km²</strong> — Wide approach corridor.'], ['Compressive strength', '<strong>12.5 MPa</strong> — Heavy lift capable.'], ['Surface obstacles', '<strong>Minimal.</strong> <span class="note">Scattered small rocks <10cm.</span>']] },
+        { icon: '🌡', title: 'ATMOSPHERIC DATA', rows: [['Pressure', '<strong>850 Pa</strong> — Superior aerodynamic braking.'], ['Wind speed', '<strong>6 km/h</strong> avg. Low variable.'], ['Dust', '<strong>0.2 particles/cm³.</strong> Standard accumulation.'], ['Daytime temp', '<strong>–5°C.</strong> Warmest equatorial profile.'], ['Night temp', '<strong>–55°C.</strong> Manageable heating load.']] },
+        { icon: '💧', title: 'WATER & RESOURCES', rows: [['Subsurface water', '<strong>Shallow aquifer confirmed (15m depth).</strong>'], ['Purity', '<strong>98.2%</strong> — Standard filtration required.'], ['Regolith chemistry', 'Nitrogen-rich. Trace perchlorates (0.02%) — negligible.']] }
+      ],
+      rmatrix: [{ l: 'TERRAIN RISK', v: '1/5', c: 'rv-g', d: 'Stable plain' }, { l: 'ATMOSPHERE', v: '1/5', c: 'rv-g', d: 'Dense/Warm' }, { l: 'WATER ACCESS', v: '1/5', c: 'rv-g', d: 'Shallow aquifer' }, { l: 'POWER', v: '1/5', c: 'rv-g', d: 'High Output' }, { l: 'COMMS', v: '2/5', c: 'rv-g', d: 'Minor lag' }],
+      rec: '<strong>RECOMMENDATION: PRIORITY ONE.</strong><br>While not theoretically perfect, Amazonis Planitia represents the <strong>optimal compromise</strong> of all mission parameters. It offers the highest safety margin and resource availability of any candidate site.<br><strong>The missed detection was due to a transient sensor ghost, now resolved.</strong>',
+      temp: [-55, -5, -30, -58, -56, -7, -28, -55, -54, -6, -31, -59, -57, -8, -29, -56, -55, -4, -30, -58, -56, -5, -31, -55, -54, -7, -32, -59, -57, -6, -30, -58, -55, -5, -29, -56, -54, -4, -30, -58],
+      res: { v: [95, 92, 98, 88, 85], note: '★ A SUPERIOR SITE. ALL PARAMETERS GREEN.' },
+      terrain: { pts: '0,115 50,118 100,115 150,112 200,115 250,118 300,115 350,112 400,115 450,118 500,115', lz: [50, 450, 115], feats: [], info: 'FLAT PLAINS · HIGH STABILITY', extra: '' }
+    };
+
+    window.execOmegaReveal = function () {
+      // 1. ALWAYS UPDATE DATA (So it's correct on refresh)
+      const claims = window.__claims || {};
+      const allKeys = Object.keys(TEASER);
+      const unclaimedKey = allKeys.find(k => !claims[k]);
+
+      let targetName = 'SECTOR OMEGA';
+      let targetLoc = 'UNKNOWN LOCATION';
+
+      if (unclaimedKey) {
+        const origName = TEASER[unclaimedKey].name;
+        if (origName.includes('(REVEALED)')) {
+          targetName = origName.replace(' (REVEALED)', '');
+          targetLoc = TEASER[unclaimedKey].loc;
+          FULL[unclaimedKey] = JSON.parse(JSON.stringify(REAL_OMEGA_FULL));
+        } else {
+          const origLoc = TEASER[unclaimedKey].loc;
+          targetName = origName;
+          targetLoc = origLoc;
+
+          // Update internally
+          FULL[unclaimedKey] = JSON.parse(JSON.stringify(REAL_OMEGA_FULL));
+          TEASER[unclaimedKey].name = origName + " (REVEALED)";
+          TEASER[unclaimedKey].pills.unshift({ t: 'UPDATED ANALYSIS', c: 'pg' });
+        }
+      }
+
+      // 2. DECIDE: DRAMATIC OVERLAY OR SILENT UPDATE?
+      const alreadySeen = localStorage.getItem('pathfinder_omega_seen');
+      const isVoting = window.__votingState;
+
+      // If voting is active OR we've seen it, skip overlay
+      if (isVoting || alreadySeen) {
+        if (!isVoting) renderGrid(claims);
+        return;
+      }
+
+      // 3. DRAMATIC REVEAL (Run once)
+      localStorage.setItem('pathfinder_omega_seen', 'true');
+
+      // Render grid with new data
+      if (!isVoting) renderGrid(claims);
+
+      const overlay = document.getElementById('omega-overlay');
+      const container = document.getElementById('omega-tx');
+      container.innerHTML = '';
+      overlay.style.display = 'block';
+      document.body.style.overflow = 'hidden';
+
+      // GENERATE TRANSCRIPT
+      const transcriptData = getOmegaTranscript(targetName, targetLoc);
+
+      let delay = 200;
+      transcriptData.forEach(line => {
+        setTimeout(() => {
+          if (window.__votingState) return; // Abort if voting starts
+
+          if (line.t === 'gap') {
+            const el = document.createElement('div');
+            el.className = 'tx-line gap vis';
+            container.appendChild(el);
+          } else if (line.t === 'big') {
+            const el = document.createElement('div');
+            el.className = 'tx-big';
+            el.textContent = line.x;
+            container.appendChild(el);
+            requestAnimationFrame(() => requestAnimationFrame(() => el.classList.add('vis')));
+          } else if (line.t === 'verdict') {
+            const el = document.createElement('div');
+            el.className = 'tx-verdict';
+            el.innerHTML = '<p><strong>Sector Omega was not assigned to any team. No team had access to the classified seismic scan.</strong><br><br>This sector was not in your briefing packs. The absence of this data was a function of classification protocol — not error.<br><br>You made your decisions under incomplete information. That is the nature of real engineering.<br><br><strong>Proceed with final sector vote.</strong></p>';
+            container.appendChild(el);
+            requestAnimationFrame(() => requestAnimationFrame(() => el.classList.add('vis')));
+          } else {
+            const el = document.createElement('div');
+            el.className = 'tx-line';
+            if (line.t === 'hi') el.classList.add('hi');
+            else if (line.t === 'am') el.classList.add('am');
+            else if (line.t === 'dim') el.classList.add('di');
+            el.textContent = line.x;
+            container.appendChild(el);
+            requestAnimationFrame(() => requestAnimationFrame(() => el.classList.add('vis')));
+            el.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+          }
+        }, delay);
+        if (line.t === 'hi') delay += 620;
+        else if (line.t === 'big') delay += 520;
+        else if (line.t === 'verdict') delay += 820;
+        else if (line.t === 'gap') delay += 160;
+        else delay += 290;
+      });
+    }
+    function closeOmega() {
+      const o = document.getElementById('omega-overlay');
+      if (!o || o.style.display === 'none') return;
+      o.style.display = 'none';
+      document.body.style.overflow = '';
+    }
+
+    // Teacher reset: Ctrl+Shift+R or Cmd+Shift+R
+    document.addEventListener('keydown', e => {
+      if ((e.ctrlKey || e.metaKey) && e.shiftKey && e.key === 'R') {
+        e.preventDefault();
+        openTeacherDashboard();
+      }
+    });
+
+    // ── TEACHER DASHBOARD LOGIC ──
+    window.openTeacherDashboard = function () {
+      console.log("Opening Dashboard");
+      const list = document.getElementById('teacher-list');
+      list.innerHTML = `
+        <div style="margin-bottom:12px;padding-bottom:12px;border-bottom:1px solid rgba(255,255,255,0.1);">
+           <button onclick="window.simulateStudent()" style="background:rgba(240,165,0,0.1);border:1px solid var(--amber);color:var(--amber);font-family:'Share Tech Mono';font-size:10px;padding:6px 12px;cursor:pointer;width:100%;">⚡ DEBUG: BECOME TEAM 1</button>
+        </div>
+      `;
+      const claims = window.__claims || {};
+
+      Object.keys(TEASER).forEach(key => {
+        const t = TEASER[key];
+        const claimedBy = claims[key];
+
+        const row = document.createElement('div');
+        row.style.display = 'flex';
+        row.style.justifyContent = 'space-between';
+        row.style.alignItems = 'center';
+        row.style.padding = '8px 12px';
+        row.style.borderBottom = '1px solid rgba(255,255,255,0.05)';
+        row.style.background = claimedBy ? 'rgba(232,64,64,0.1)' : 'rgba(46,204,113,0.05)';
+
+        row.innerHTML = `
+          <div style="font-family:'Orbitron',monospace;font-size:11px;color:${claimedBy ? 'var(--red)' : 'var(--green)'};">
+            ${t.name}
+            <div style="font-family:'Share Tech Mono';font-size:10px;color:var(--text-dim);">${claimedBy ? `CLAIMED BY ${claimedBy}` : 'AVAILABLE'}</div>
+          </div>
+          ${claimedBy ?
+            `<button onclick="window.teacherRelease('${key}')" style="background:none;border:1px solid var(--red);color:var(--red);font-family:'Share Tech Mono';font-size:10px;padding:4px 8px;cursor:pointer;">RELEASE</button>` :
+            `<span style="font-size:10px;color:var(--text-dim);opacity:0.5;">—</span>`}
+        `;
+        list.appendChild(row);
+      });
+
+      document.getElementById('modal-teacher').classList.add('open');
+    }
+
+    // DEBUG: Simulate a student identity for testing
+    window.simulateStudent = function () {
+      const team = "TEAM 1";
+      const sector = Object.keys(TEASER)[0]; // First sector
+      localStorage.setItem('pathfinder_my_team', team);
+      localStorage.setItem('pathfinder_my_sector', sector);
+      alert(`debug: Identity set to ${team}. You can now vote.`);
+      window.closeTeacherDashboard();
+    }
+
+    window.saveClassSize = async function () {
+      const val = parseInt(document.getElementById('class-size-input').value);
+      if (val > 0) {
+        await set(ref(db, 'pathfinder/class_size'), val);
+        alert("✓ CLASS SIZE UPDATED TO " + val);
+      }
+    }
+
+    window.closeTeacherDashboard = function () {
+      document.getElementById('modal-teacher').classList.remove('open');
+    }
+
+    window.teacherRelease = async function (key) {
+      if (!confirm(`Release ${TEASER[key].name}? This will allow other teams to claim it.`)) return;
+      try {
+        const sectorRef = ref(db, `pathfinder/claims/${key}`);
+        await set(sectorRef, null);
+        window.openTeacherDashboard();
+      } catch (e) {
+        alert("ERROR: " + e.message);
+        console.error(e);
+      }
+    }
+
+    window.teacherResetAll = async function () {
+      if (confirm('⚠ RESET ENTIRE SIMULATION? (Claims, Voting, Omega)')) {
+        try {
+          const db = window.db;
+          const ref = window.ref;
+          const set = window.set;
+
+          // 1. Reset Claims
+          await set(window.claimsRef, {});
+
+          // 2. Reset Voting State & Votes
+          await set(ref(db, 'pathfinder/voting_active'), false);
+          await set(ref(db, 'pathfinder/votes'), null);
+          await set(ref(db, 'pathfinder/omega_revealed'), false);
+
+          // 3. Clear Local State
+          localStorage.removeItem('pathfinder_omega_seen');
+
+          window.closeTeacherDashboard();
+          window.goHome();
+        } catch (e) {
+          alert("ERROR: " + e.message);
+          console.error(e);
+        }
+      }
+    }
+
+    // ── EXPOSE FUNCTIONS TO HTML ──
+    window.showSector = showSector;
+    window.goHome = goHome;
+    window.doClaim = doClaim;
+    window.openCodeModal = openCodeModal;
+    window.closeCodeModal = closeCodeModal;
+    window.validateCode = validateCode;
+    window.closeClaimModal = closeClaimModal;
+    window.triggerOmega = function () {
+      if (confirm('⚠ TRIGGER REVEAL EVENT FOR ALL STUDENTS?')) {
+        window.set(window.omegaRef, true);
+      }
+    }
+    window.fireOmega = window.triggerOmega; // Use same fn for keypress trigger
+    window.closeOmega = closeOmega;
+
+    // ══════════════════════════════════════════════════
+    //  VOTING LOGIC
+    // ══════════════════════════════════════════════════
+    // Wrapped in init function to wait for Firebase module
+    window.initVoting = function () {
+      if (!window.db || !window.ref) { console.error("Firebase not ready"); return; }
+
+      const db = window.db;
+      const ref = window.ref;
+      const onValue = window.onValue;
+      const set = window.set;
+
+      const voteRef = ref(db, 'pathfinder/votes');
+      const votingActiveRef = ref(db, 'pathfinder/voting_active');
+
+      window.voteRef = voteRef; // Make global for debugging
+      window.votingActiveRef = votingActiveRef;
+
+      // Listener for Voting Phase
+      onValue(votingActiveRef, (snap) => {
+        const isActive = snap.val() === true;
+        window.__votingState = isActive;
+
+        // Re-render grid to update the 8th card state
+        // We use the last known claims since they might not have changed
+        renderGrid(window.__claims || {});
+
+        // Update banner
+        const banner = document.getElementById('phase-banner');
+        if (isActive) {
+          banner.textContent = "PHASE 2 — FINAL VOTING OPEN — SUBMIT RECOMMENDATION VIA VOTING CARD";
+          banner.style.color = "var(--green)";
+          banner.style.borderColor = "var(--green)";
+          banner.style.background = "linear-gradient(90deg, #0a1a0a, #0f2d15, #0a1a0a)";
+        }
+      });
+
+      // Listener for Results
+      onValue(voteRef, (snap) => {
+        if (document.getElementById('results-overlay').style.display === 'block') {
+          renderResultsChart(snap.val());
+        }
+      });
+
+      // Expose start function using the captured refs
+      window.startVoting = function () {
+        if (confirm("⚠ OPEN VOTING PHASE?")) {
+          set(votingActiveRef, true);
+        }
+      }
+    };
+
+    // showVotingPhase REMOVED - replaced by grid card logic
+
+    // State for the voting UI
+    let currentVotes = [null, null, null]; // [1st, 2nd, 3rd]
+
+    // Helper: Get or Create Unique Voter ID
+    function getVoterID() {
+      let vid = localStorage.getItem('pathfinder_vid');
+      if (!vid) {
+        vid = 'v_' + Math.random().toString(36).substr(2, 9);
+        localStorage.setItem('pathfinder_vid', vid);
+      }
+      return vid;
+    }
+
+    // UPDATED: Check for existing INDIVIDUAL vote before opening modal
+    // We remove the redeclaration of _originalOpenVote by checking if it already exists or using a different pattern
+    // Ideally we should just redefine the function directly without wrapping if possible, or use a unique name
+    // BUT simplest fix for the "redeclare" error is to remove the "const" if it was already defined, 
+    // or just define the logic inside openVoteModal directly.
+
+    window.openVoteModal = async function () {
+      const myTeam = localStorage.getItem('pathfinder_my_team');
+      const mySector = localStorage.getItem('pathfinder_my_sector');
+
+      // Basic check
+      if (!myTeam) {
+        // Show error manually since we can't easily call the "original" if it's lost/overwritten 
+        // actually we can just copy the error logic here
+        const form = document.getElementById('vote-form');
+        form.innerHTML = '<div style="color:var(--red);font-size:12px;">⚠ ERROR: TEAM IDENTITY NOT FOUND.<br>You must claim a sector to identify your team before voting.</div>';
+        document.getElementById('modal-vote').classList.add('open');
+        return;
+      }
+
+      const vid = getVoterID();
+      // Check if WE specifically already voted
+      const snap = await get(ref(db, `pathfinder/votes/${myTeam}/${vid}`));
+      if (snap.exists()) {
+        window.showResults();
+      } else {
+        // Proceed to render UI
+        currentVotes = [null, null, null];
+        const form = document.getElementById('vote-form');
+        form.innerHTML = '';
+
+        // RENDER SLOTS... (Rest of original function logic)
+        // To avoid duplicating 100 lines of code, let's just make a render function
+        _renderVoteModalContent();
+      }
+    }
+
+    function _renderVoteModalContent() {
+      const myTeam = localStorage.getItem('pathfinder_my_team');
+      const mySector = localStorage.getItem('pathfinder_my_sector');
+      const form = document.getElementById('vote-form');
+
+      // RENDER SLOTS
+      const slotsContainer = document.createElement('div');
+      slotsContainer.className = 'vote-slots';
+      slotsContainer.id = 'vote-slots';
+      form.appendChild(slotsContainer);
+
+      // RENDER POOL
+      const poolTitle = document.createElement('div');
+      poolTitle.style.cssText = "font-family:'Orbitron';font-size:10px;color:var(--text-dim);margin-bottom:8px;letter-spacing:1px;text-align:left;";
+      poolTitle.textContent = "AVAILABLE SECTORS";
+      form.appendChild(poolTitle);
+
+      const poolContainer = document.createElement('div');
+      poolContainer.className = 'vote-pool';
+      poolContainer.id = 'vote-pool';
+      form.appendChild(poolContainer);
+
+      window.renderVoteUI = function () {
+        // 1. Render Slots
+        slotsContainer.innerHTML = '';
+        ['1ST CHOICE', '2ND CHOICE', '3RD CHOICE'].forEach((label, i) => {
+          const key = currentVotes[i];
+          const name = key ? TEASER[key].name : '— TAP TO SELECT —';
+
+          const slot = document.createElement('div');
+          slot.className = 'vote-slot ' + (key ? 'filled' : '');
+          slot.onclick = () => {
+            if (key) {
+              currentVotes[i] = null;
+              renderVoteUI();
+            }
+          };
+          slot.innerHTML = `
+                    <div class="slot-rank">${i + 1}</div>
+                    <div class="slot-val">${name}</div>
+                    <div class="slot-x">✕</div>
+                `;
+          slotsContainer.appendChild(slot);
+        });
+
+        // 2. Render Pool
+        poolContainer.innerHTML = '';
+        Object.keys(TEASER).forEach(key => {
+          if (key === mySector) return; // Cannot vote for own
+
+          const isSelected = currentVotes.includes(key);
+          const btn = document.createElement('button');
+          btn.className = 'pool-btn ' + (isSelected ? 'selected' : '');
+          btn.textContent = TEASER[key].name;
+          btn.onclick = () => {
+            // Find first empty slot
+            const firstEmpty = currentVotes.indexOf(null);
+            if (firstEmpty !== -1) {
+              currentVotes[firstEmpty] = key;
+              renderVoteUI();
+            }
+          };
+          poolContainer.appendChild(btn);
+        });
+
+        // Update visual error state
+        document.getElementById('vote-err').style.display = 'none';
+      };
+
+      renderVoteUI();
+      document.getElementById('modal-vote').classList.add('open');
+      renderVoteUI();
+      document.getElementById('modal-vote').classList.add('open');
+    }
+
+    window.closeVoteModal = function () {
+      document.getElementById('modal-vote').classList.remove('open');
+    }
+
+    window.submitVote = async function () {
+      const db = window.db;
+      const ref = window.ref;
+      const set = window.set;
+
+      const v0 = currentVotes[0];
+      const v1 = currentVotes[1];
+      const v2 = currentVotes[2];
+      const err = document.getElementById('vote-err');
+      const myTeam = localStorage.getItem('pathfinder_my_team');
+
+      if (!v0 || !v1 || !v2) {
+        err.textContent = "⚠ INCOMPLETE: PLEASE SELECT 3 SECTORS";
+        err.style.display = 'block';
+        return;
+      }
+
+      const btn = document.querySelector('#modal-vote .modal-btn');
+      btn.textContent = "TRANSMITTING...";
+      btn.disabled = true;
+
+      try {
+        const vid = getVoterID();
+        // Store under team -> voterID
+        await set(ref(db, `pathfinder/votes/${myTeam}/${vid}`), {
+          1: v0, 2: v1, 3: v2, ts: Date.now()
+        });
+        closeVoteModal();
+        // Show results immediately after voting
+        window.showResults();
+      } catch (e) {
+        err.textContent = "TX ERROR: " + e.message;
+        btn.disabled = false;
+        btn.textContent = "TRY AGAIN";
+      }
+    }
+
+    // RESULTS & RIGGING
+    // window.startVoting defined in initVoting now to access refs correctly
+
+    window.showResults = function () {
+      const overlay = document.getElementById('results-overlay');
+      overlay.style.display = 'block';
+
+      // If we don't have data yet (first load), try to fetch once
+      if (document.getElementById('results-chart').children.length === 0) {
+        window.get(window.voteRef).then(snap => {
+          if (snap.exists()) renderResultsChart(snap.val());
+        });
+      }
+    }
+    window.closeResults = function () {
+      document.getElementById('results-overlay').style.display = 'none';
+    }
+
+    async function renderResultsChart(votesRaw) {
+      const chart = document.getElementById('results-chart');
+      const totalDisplay = document.getElementById('total-votes');
+
+      if (!votesRaw) {
+        chart.innerHTML = '<div style="color:var(--text-dim);text-align:center;padding:40px;">NO VOTES RECORDED YET</div>';
+        totalDisplay.textContent = "0 VOTES CAST";
+        return;
+      }
+
+      // FLATTEN VOTES: votesRaw is { "TEAM 1": { "v_123": {...}, "v_456": {...} } }
+      const flatVotes = [];
+      Object.values(votesRaw).forEach(teamVotes => {
+        if (teamVotes) Object.values(teamVotes).forEach(v => flatVotes.push(v));
+      });
+
+      const total = flatVotes.length;
+
+      // Tally (Weighted: 1st=3pts, 2nd=2pts, 3rd=1pt)
+      const scores = {};
+      Object.keys(TEASER).forEach(k => scores[k] = 0);
+
+      flatVotes.forEach(v => {
+        if (v[1]) scores[v[1]] += 1;
+        if (v[2]) scores[v[2]] += 1;
+        if (v[3]) scores[v[3]] += 1;
+      });
+
+      // THE RIG: Ensure Omega = Max(Others) + 1 (Only if at least one other sector has score)
+      let maxScore = 0;
+      Object.entries(scores).forEach(([k, s]) => {
+        if (k !== 'omega' && s > maxScore) maxScore = s;
+      });
+      if (maxScore > 0) scores['omega'] = maxScore + 1;
+
+      // Class Size Progress
+      let classSize = 25; // Default fallback
+      try {
+        const snap = await get(ref(db, 'pathfinder/class_size'));
+        if (snap.exists()) classSize = snap.val();
+      } catch (e) { }
+
+      const progressPct = Math.min(100, Math.round((total / classSize) * 100));
+
+      totalDisplay.innerHTML = `
+        <div style="margin-bottom:8px;">${total} OF ${classSize} VOTES CAST</div>
+        <div style="width:100%;height:4px;background:rgba(255,255,255,0.1);border-radius:2px;overflow:hidden;">
+            <div style="width:${progressPct}%;height:100%;background:var(--green);transition:width 1s;"></div>
+        </div>
+      `;
+
+      chart.innerHTML = '';
+
+      // Sort for display
+      const sorted = Object.entries(scores).sort((a, b) => b[1] - a[1]);
+      const maxVal = sorted[0][1];
+
+      sorted.forEach(([k, s]) => {
+        const name = TEASER[k].name;
+        const pct = (s / maxVal) * 100;
+        const color = k === 'omega' ? '#2ecc71' : (k === 'jezero' ? '#3498db' : '#f0a500'); // Dynamic colors
+
+        const row = document.createElement('div');
+        row.className = 'res-bar-row';
+        row.innerHTML = `
+          <div class="res-bar-lbl"><span>${name}</span><span>${s} PTS</span></div>
+          <div class="res-bar-track">
+            <div class="res-bar-fill" style="width:0%;background:${color};"></div>
+            <div class="res-val">${s}</div>
+          </div>
+        `;
+        chart.appendChild(row);
+        // Animate
+        requestAnimationFrame(() => requestAnimationFrame(() => {
+          row.querySelector('.res-bar-fill').style.width = pct + '%';
+        }));
+      });
+    }
+
+    // Add Teacher Controls for Voting
+    // We use a timeout to ensure the DOM is ready, and a more generic selector
+    setTimeout(() => {
+      const dashboard = document.getElementById('modal-teacher');
+      if (!dashboard) return;
+
+      // Find the button container - it's the div with the reset/omega buttons
+      // It has a top border and flex display
+      const btnContainer = dashboard.querySelector('div[style*="display:flex"]');
+
+      if (btnContainer) {
+        // Check if buttons already exist to prevent duplicates
+        if (btnContainer.querySelector('.btn-vote-start')) return;
+
+        const btnVote = document.createElement('button');
+        btnVote.className = 'modal-btn btn-vote-start';
+        btnVote.onclick = () => { window.startVoting(); window.closeTeacherDashboard(); };
+        btnVote.textContent = '🗳 START VOTING';
+        btnVote.style.background = 'rgba(46,204,113,.1)';
+        btnVote.style.borderColor = 'var(--green)';
+        btnVote.style.color = 'var(--green)';
+        btnVote.style.width = 'auto';
+
+        const btnRes = document.createElement('button');
+        btnRes.className = 'modal-btn btn-vote-res';
+        btnRes.onclick = () => { window.showResults(); window.closeTeacherDashboard(); };
+        btnRes.textContent = '📊 SHOW RESULTS';
+        btnRes.style.background = 'rgba(52,152,219,.1)';
+        btnRes.style.borderColor = '#3498db';
+        btnRes.style.color = '#3498db';
+        btnRes.style.width = 'auto';
+
+        btnContainer.appendChild(btnVote);
+        btnContainer.appendChild(btnRes);
+      }
+    }, 1000);
+  </script>
+</body>
+
+</html>
