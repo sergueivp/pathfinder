@@ -1555,7 +1555,8 @@
     <div class="tb-right">
       <span class="fuel-pill" id="fuel-status">⚠ FUEL: 4% — CRITICAL</span>
       <span>SOL 10 &nbsp;|&nbsp; FINAL LANDING WINDOW</span>
-      <span onclick="openTeacherDashboard()" style="cursor:pointer;opacity:0.3;margin-left:10px;font-size:14px;"
+      <span id="teacher-gear" onclick="openTeacherDashboard()"
+        style="cursor:pointer;opacity:0.3;margin-left:10px;font-size:14px;display:none;"
         title="Teacher Controls">⚙</span>
     </div>
   </div>
@@ -2545,9 +2546,15 @@
           await set(ref(db, 'pathfinder/mission_complete'), false);
           await set(ref(db, 'pathfinder/class_size'), 25);
 
-          // 2. Clear Local State
-          localStorage.clear(); // Nuclear option for "Everything"
-          localStorage.removeItem('pathfinder_outro_seen'); // Explicitly ensure this is gone (redundant but safe)
+          // 2. Trigger Global Wipe for all clients
+          await set(ref(db, 'pathfinder/reset_trigger'), Date.now());
+
+          // 3. Clear Local State (Self)
+          localStorage.clear();
+          // Preserve commander role if present (optional, but nice for teacher)
+          if (window.location.search.includes('commander')) {
+            localStorage.setItem('pathfinder_role', 'commander');
+          }
 
           alert("✅ SIMULATION RESET COMPLETE. RELOADING...");
           window.location.reload();
@@ -2940,6 +2947,11 @@
 
       try {
         if (localStorage.getItem('pathfinder_role') === 'commander') {
+          // 1. Show Gear Icon
+          const gear = document.getElementById('teacher-gear');
+          if (gear) gear.style.display = 'inline-block';
+
+          // 2. Show Float Button
           const btn = document.getElementById('commander-btn');
           if (btn) {
             btn.style.display = 'block';
@@ -3075,6 +3087,7 @@
         clearInterval(_sysInit);
         window.initVoting();
         window.initMissionStart(); // Start listener
+        window.initGlobalReset(); // Start global reset listener
         console.log("✅ SYSTEM ONLINE: Voting & Outro Sync Active");
       }
     }, 500);
@@ -3112,6 +3125,31 @@
       // Disable button locally to show it worked
       const btn = document.getElementById('btn-start-mission');
       if (btn) { btn.innerText = "✓ UPLINK ACTIVE"; btn.disabled = true; }
+    }
+
+    // ── GLOBAL RESET LISTENER ──
+    window.initGlobalReset = function () {
+      // Listen for reset trigger
+      const resetRef = ref(db, 'pathfinder/reset_trigger');
+      const bootTime = Date.now();
+
+      onValue(resetRef, (snap) => {
+        const triggerTime = snap.val();
+        // Check if trigger exists and is NEWER than when this page loaded
+        if (triggerTime && triggerTime > bootTime) {
+          console.warn("⚠️ GLOBAL RESET SIGNAL RECEIVED");
+          localStorage.clear();
+
+          // Attempt to preserve commander role if currently on commander URL
+          const urlParams = new URLSearchParams(window.location.search);
+          if (urlParams.get('mode') === 'commander') {
+            localStorage.setItem('pathfinder_role', 'commander');
+          }
+
+          alert("⚠️ COMMAND RECEIVED: GLOBAL RESET INITIATED.");
+          window.location.reload();
+        }
+      });
     }
   </script>
 </body>
