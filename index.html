@@ -1711,8 +1711,12 @@
 
   <!-- VIDEO CONTAINERS -->
   <div id="intro-gate" style="display:none;">
-    <div class="pulsing-tx">⚠ INCOMING TRANSMISSION</div>
-    <button class="accept-btn" onclick="playIntroVideo()">ESTABLISH LINK</button>
+    <div class="pulsing-tx" id="intro-tx-msg">⚠ SIGNAL DETECTED</div>
+    <div id="intro-status"
+      style="font-family:'Share Tech Mono';color:var(--text-dim);margin-bottom:20px;letter-spacing:2px;font-size:12px;">
+      WAITING FOR UPLINK...</div>
+    <button id="intro-btn" class="accept-btn" onclick="playIntroVideo()" disabled
+      style="opacity:0.5;cursor:not-allowed;">ESTABLISH LINK</button>
   </div>
 
   <div id="intro-end-screen" onclick="finishIntro()">
@@ -2432,9 +2436,10 @@
       console.log("Opening Dashboard");
       const list = document.getElementById('teacher-list');
       list.innerHTML = `
-        <div style="margin-bottom:12px;padding-bottom:12px;border-bottom:1px solid rgba(255,255,255,0.1);">
-           <button onclick="window.simulateStudent()" style="background:rgba(240,165,0,0.1);border:1px solid var(--amber);color:var(--amber);font-family:'Share Tech Mono';font-size:10px;padding:6px 12px;cursor:pointer;width:100%;">⚡ DEBUG: BECOME TEAM 1</button>
-        </div>
+        <div style="margin-bottom:12px;padding-bottom:12px;border-bottom:1px solid rgba(255,255,255,0.1);display:flex;gap:10px;">
+           <button onclick="window.startMission()" id="btn-start-mission" style="flex:1;background:rgba(46,204,113,0.1);border:1px solid var(--green);color:var(--green);font-family:'Share Tech Mono';font-size:10px;padding:8px;cursor:pointer;">📡 RELEASE UPLINK (START)</button>
+           <button onclick="window.simulateStudent()" style="flex:1;background:rgba(240,165,0,0.1);border:1px solid var(--amber);color:var(--amber);font-family:'Share Tech Mono';font-size:10px;padding:8px;cursor:pointer;">⚡ DEBUG: TEAM 1</button>
+         </div>
       `;
       const claims = window.__claims || {};
 
@@ -2508,6 +2513,7 @@
 
           // 1. Reset Firebase State
           await set(window.claimsRef, {});
+          await set(ref(db, 'pathfinder/mission_start'), false);
           await set(ref(db, 'pathfinder/voting_active'), false);
           await set(ref(db, 'pathfinder/votes'), null);
           await set(ref(db, 'pathfinder/omega_revealed'), false);
@@ -3002,9 +3008,45 @@
       if (window.db && window.ref && window.initVoting) {
         clearInterval(_sysInit);
         window.initVoting();
+        window.initMissionStart(); // Start listener
         console.log("✅ SYSTEM ONLINE: Voting & Outro Sync Active");
       }
     }, 500);
+
+    window.initMissionStart = function () {
+      const startRef = ref(db, 'pathfinder/mission_start');
+      onValue(startRef, (snap) => {
+        const isStarted = snap.val() === true;
+        const btn = document.getElementById('intro-btn');
+        const status = document.getElementById('intro-status');
+        const msg = document.getElementById('intro-tx-msg');
+
+        if (isStarted) {
+          btn.disabled = false;
+          btn.style.opacity = '1';
+          btn.style.cursor = 'pointer';
+          btn.innerText = "ESTABLISH LINK";
+          status.innerText = "UPLINK AVAILABLE";
+          status.style.color = "var(--green)";
+          msg.innerText = "⚠ INCOMING TRANSMISSION";
+        } else {
+          // Reset if untoggled (rare)
+          btn.disabled = true;
+          btn.style.opacity = '0.5';
+          btn.style.cursor = 'not-allowed';
+          status.innerText = "WAITING FOR UPLINK...";
+          status.style.color = "var(--text-dim)";
+        }
+      });
+    }
+
+    window.startMission = function () {
+      if (!confirm("Release Uplink? This will allow ALL students to play the intro video.")) return;
+      set(ref(db, 'pathfinder/mission_start'), true);
+      // Disable button locally to show it worked
+      const btn = document.getElementById('btn-start-mission');
+      if (btn) { btn.innerText = "✓ UPLINK ACTIVE"; btn.disabled = true; }
+    }
   </script>
 </body>
 
