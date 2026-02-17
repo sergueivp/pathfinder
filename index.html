@@ -1522,6 +1522,28 @@
       font-size: 14px;
       letter-spacing: 2px;
     }
+
+    /* ── COMMANDER BUTTON ── */
+    #commander-btn {
+      position: fixed;
+      top: 10px;
+      right: 10px;
+      z-index: 4000;
+      background: rgba(46, 204, 113, 0.2);
+      border: 1px solid var(--green);
+      color: var(--green);
+      font-family: 'Share Tech Mono';
+      font-size: 10px;
+      padding: 6px 12px;
+      cursor: pointer;
+      backdrop-filter: blur(4px);
+      display: none;
+      /* Hidden by default */
+    }
+
+    #commander-btn:hover {
+      background: rgba(46, 204, 113, 0.4);
+    }
   </style>
 </head>
 
@@ -1739,6 +1761,8 @@
       <video id="main-video" playsinline></video>
     </div>
   </div>
+
+  <button id="commander-btn" onclick="openTeacherDashboard()">COMMAND</button>
 
   <script>
     // ══════════════════════════════════════════════════
@@ -2439,6 +2463,7 @@
         <div style="margin-bottom:12px;padding-bottom:12px;border-bottom:1px solid rgba(255,255,255,0.1);display:flex;gap:10px;">
            <button onclick="window.startMission()" id="btn-start-mission" style="flex:1;background:rgba(46,204,113,0.1);border:1px solid var(--green);color:var(--green);font-family:'Share Tech Mono';font-size:10px;padding:8px;cursor:pointer;">📡 RELEASE UPLINK (START)</button>
            <button onclick="window.simulateStudent()" style="flex:1;background:rgba(240,165,0,0.1);border:1px solid var(--amber);color:var(--amber);font-family:'Share Tech Mono';font-size:10px;padding:8px;cursor:pointer;">⚡ DEBUG: TEAM 1</button>
+           <button onclick="window.logoutCommander()" style="background:rgba(232,64,64,0.1);border:1px solid var(--red);color:var(--red);font-family:'Share Tech Mono';font-size:10px;padding:8px;cursor:pointer;">✕ LOGOUT</button>
          </div>
       `;
       const claims = window.__claims || {};
@@ -2891,6 +2916,8 @@
       });
     }
 
+
+
     // ── VIDEO SEQUENCE LOGIC ──
 
     // 1. Check Intro on Load
@@ -2899,7 +2926,29 @@
       if (!seen) {
         document.getElementById('intro-gate').style.display = 'flex';
       }
+      checkCommanderMode();
     });
+
+    function checkCommanderMode() {
+      const urlParams = new URLSearchParams(window.location.search);
+      if (urlParams.get('mode') === 'commander') {
+        localStorage.setItem('pathfinder_role', 'commander');
+        // Clean URL without reload
+        window.history.replaceState({}, document.title, window.location.pathname);
+      }
+
+      if (localStorage.getItem('pathfinder_role') === 'commander') {
+        const btn = document.getElementById('commander-btn');
+        if (btn) btn.style.display = 'block';
+      }
+    }
+
+    window.logoutCommander = function () {
+      localStorage.removeItem('pathfinder_role');
+      document.getElementById('commander-btn').style.display = 'none';
+      closeTeacherDashboard();
+      alert("Commander credentials revoked.");
+    }
 
     window.playIntroVideo = function () {
       document.getElementById('intro-gate').style.display = 'none';
