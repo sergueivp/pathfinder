@@ -1350,6 +1350,178 @@
       color: #fff;
       text-shadow: 0 0 4px #000;
     }
+
+    /* ── VIDEO OVERLAYS ── */
+    .modal-backdrop {
+      display: none;
+      position: fixed;
+      inset: 0;
+      background: rgba(0, 0, 0, 0.85);
+      backdrop-filter: blur(5px);
+      z-index: 3000;
+      align-items: center;
+      justify-content: center;
+    }
+
+    .tx-window {
+      width: 90%;
+      max-width: 900px;
+      background: #000;
+      border: 1px solid var(--green);
+      box-shadow: 0 0 40px rgba(46, 204, 113, 0.15);
+      display: flex;
+      flex-direction: column;
+      position: relative;
+      animation: openWindow 0.3s ease-out;
+    }
+
+    @keyframes openWindow {
+      from {
+        transform: scale(0.9);
+        opacity: 0;
+      }
+
+      to {
+        transform: scale(1);
+        opacity: 1;
+      }
+    }
+
+    .tx-nav {
+      height: 28px;
+      border-bottom: 1px solid var(--green);
+      background: rgba(46, 204, 113, 0.05);
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      padding: 0 12px;
+      font-family: 'Share Tech Mono';
+      font-size: 11px;
+      color: var(--green);
+      letter-spacing: 1px;
+    }
+
+    .tx-rec {
+      color: var(--red);
+      animation: blink 1s infinite;
+    }
+
+    #video-overlay {
+      z-index: 3000;
+    }
+
+    video {
+      width: 100%;
+      aspect-ratio: 16/9;
+      background: #000;
+    }
+
+    #intro-gate {
+      /* Full screen gate - keep straightforward or window? 
+         User asked for video to be smaller. Let's keep gate full but transparent?
+         No, existing black is fine, but video overlay needs to be 'modal-backdrop' class logic. 
+      */
+      display: none;
+      position: fixed;
+      inset: 0;
+      background: #000;
+      z-index: 3100;
+      display: flex;
+      /* overridden by JS toggle */
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+    }
+
+    .pulsing-tx {
+      font-family: 'Orbitron';
+      font-size: 24px;
+      letter-spacing: 5px;
+      color: var(--green);
+      animation: pulse 2s infinite;
+      margin-bottom: 30px;
+    }
+
+    @keyframes pulse {
+      0% {
+        opacity: 0.3;
+      }
+
+      50% {
+        opacity: 1;
+      }
+
+      100% {
+        opacity: 0.3;
+      }
+    }
+
+    .accept-btn {
+      background: rgba(46, 204, 113, 0.1);
+      border: 1px solid var(--green);
+      color: var(--green);
+      padding: 15px 40px;
+      font-family: 'Share Tech Mono';
+      font-size: 14px;
+      letter-spacing: 2px;
+      cursor: pointer;
+      transition: all 0.3s;
+    }
+
+    .accept-btn:hover {
+      background: var(--green);
+      color: #000;
+      box-shadow: 0 0 30px var(--green);
+    }
+
+    #intro-end-screen {
+      display: none;
+      position: fixed;
+      inset: 0;
+      background: #000;
+      z-index: 3200;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      cursor: pointer;
+    }
+
+    .end-tx-msg {
+      font-family: 'Share Tech Mono';
+      font-size: 16px;
+      color: var(--text-dim);
+      letter-spacing: 2px;
+      animation: blink 2s infinite;
+      text-align: center;
+      line-height: 1.6;
+    }
+
+    @keyframes blink {
+
+      0%,
+      100% {
+        opacity: 1;
+      }
+
+      50% {
+        opacity: 0.5;
+      }
+    }
+
+    #outro-transition {
+      display: none;
+      position: fixed;
+      inset: 0;
+      background: #000;
+      z-index: 3100;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      font-family: 'Share Tech Mono';
+      color: var(--green);
+      font-size: 14px;
+      letter-spacing: 2px;
+    }
   </style>
 </head>
 
@@ -1359,7 +1531,7 @@
   <div class="topbar">
     <div class="tb-left">PATHFINDER FLEET — MARS ORBITAL COMMAND</div>
     <div class="tb-right">
-      <span class="fuel-pill">⚠ FUEL: 4% — CRITICAL</span>
+      <span class="fuel-pill" id="fuel-status">⚠ FUEL: 4% — CRITICAL</span>
       <span>SOL 10 &nbsp;|&nbsp; FINAL LANDING WINDOW</span>
       <span onclick="openTeacherDashboard()" style="cursor:pointer;opacity:0.3;margin-left:10px;font-size:14px;"
         title="Teacher Controls">⚙</span>
@@ -1381,7 +1553,7 @@
         <!-- Dynamic list of sectors -->
       </div>
 
-      <div
+      <div id="teacher-actions"
         style="border-top:1px solid var(--border);padding-top:20px;margin-top:20px;display:flex;gap:12px;justify-content:center;flex-wrap:wrap;">
         <div style="width:100%;margin-bottom:10px;text-align:center;">
           <label style="color:var(--text-dim);font-family:'Share Tech Mono';font-size:11px;">CLASS SIZE (FOR
@@ -1392,11 +1564,34 @@
             style="background:var(--bg3);border:1px solid var(--border);color:var(--green);padding:4px 8px;cursor:pointer;font-family:'Share Tech Mono';font-size:10px;">SAVE</button>
         </div>
 
-        <button class="modal-btn" style="background:var(--red-dim);border-color:var(--red);color:var(--red);width:auto;"
-          onclick="window.teacherResetAll()">⚠ RESET ALL TEAMS</button>
+        <!-- OMEGA TRIGGER -->
         <button class="modal-btn"
           style="background:rgba(232,64,64,.1);border-color:var(--red);color:var(--red);width:auto;"
           onclick="window.fireOmega();window.closeTeacherDashboard()">☢ TRIGGER OMEGA EVENT</button>
+
+        <!-- VOTING CONTROLS -->
+        <button class="modal-btn" onclick="window.startVoting();window.closeTeacherDashboard()"
+          style="background:rgba(46,204,113,.1);border-color:var(--green);color:var(--green);width:auto;">🗳 START
+          VOTING</button>
+
+        <button class="modal-btn btn-vote-res" onclick="window.showResults();window.closeTeacherDashboard()"
+          style="background:rgba(52,152,219,.1);border-color:#3498db;color:#3498db;width:auto;">📊 SHOW
+          RESULTS</button>
+
+        <!-- INTRO RESET -->
+        <button class="modal-btn" onclick="localStorage.removeItem('pathfinder_intro_seen');alert('✅ INTRO RESET');"
+          style="background:rgba(255,255,255,0.1);border-color:#fff;color:#fff;width:auto;font-size:9px;">↺ RESET
+          INTRO</button>
+
+        <!-- TRANSMIT FINAL -->
+        <button class="modal-btn" onclick="window.triggerOutro()"
+          style="background:rgba(231, 76, 60, 0.1);border-color:#e74c3c;color:#e74c3c;width:auto;">📡 TRANSMIT FINAL
+          RESULT</button>
+
+        <!-- MASTER RESET -->
+        <button class="modal-btn"
+          style="background:rgba(255,0,0,0.2);border-color:red;color:red;width:auto;margin-top:12px;"
+          onclick="window.teacherResetAll()">☠ MASTER RESET</button>
       </div>
       <button class="modal-cancel" onclick="window.closeTeacherDashboard()" style="margin-top:16px;">CLOSE
         DASHBOARD</button>
@@ -1496,14 +1691,48 @@
 
   <!-- ═══════════ VIEW: RESULTS ═══════════ -->
   <div id="results-overlay">
-    <div style="max-width:800px;margin:0 auto;">
+    <div style="max-width:800px;margin:0 auto;position:relative;">
       <div class="dv-header">
         <div class="dv-lbl">MISSION COMMAND — FINAL DECISION</div>
         <div class="dv-title" style="color:var(--green)">SECTOR SELECTION RESULTS</div>
         <div class="dv-loc" id="total-votes">WAITING FOR DATA...</div>
       </div>
       <div id="results-chart" style="margin-top:40px;"></div>
-      <button class="back-btn" onclick="closeResults()" style="margin-top:40px;position:static;">CLOSE RESULTS</button>
+
+      <div style="margin-top:40px;display:flex;gap:20px;justify-content:center;">
+        <button class="back-btn" onclick="closeResults()" style="position:static;width:auto;">CLOSE RESULTS</button>
+        <div id="mission-status"
+          style="font-family:'Share Tech Mono';color:var(--text-dim);display:flex;align-items:center;background:rgba(255,255,255,0.05);padding:10px 20px;border:1px solid rgba(255,255,255,0.1);">
+          AWAITING MISSION COMMAND TRANSMISSION...
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- VIDEO CONTAINERS -->
+  <div id="intro-gate" style="display:none;">
+    <div class="pulsing-tx">⚠ INCOMING TRANSMISSION</div>
+    <button class="accept-btn" onclick="playIntroVideo()">ESTABLISH LINK</button>
+  </div>
+
+  <div id="intro-end-screen" onclick="finishIntro()">
+    <div class="end-tx-msg">
+      // END OF TRANSMISSION //<br>
+      <span style="font-size:12px;opacity:0.7;">CLICK TERMINAL TO INITIALIZE DASHBOARD</span>
+    </div>
+  </div>
+
+  <div id="outro-transition">
+    <div id="outro-tx-text"></div>
+  </div>
+
+  <div id="video-overlay" class="modal-backdrop">
+    <div class="tx-window">
+      <div class="tx-nav">
+        <span>⚠ INCOMING ENCRYPTED STREAM</span>
+        <span><span class="tx-rec">● REC</span> &nbsp; LIVE FEED</span>
+      </div>
+      <video id="main-video" playsinline></video>
     </div>
   </div>
 
@@ -2111,8 +2340,9 @@
           targetLoc = origLoc;
 
           // Update internally
+          // Update internally
           FULL[unclaimedKey] = JSON.parse(JSON.stringify(REAL_OMEGA_FULL));
-          TEASER[unclaimedKey].name = origName + " (REVEALED)";
+          TEASER[unclaimedKey].name = origName; // Keep original name
           TEASER[unclaimedKey].pills.unshift({ t: 'UPDATED ANALYSIS', c: 'pg' });
         }
       }
@@ -2270,25 +2500,26 @@
     }
 
     window.teacherResetAll = async function () {
-      if (confirm('⚠ RESET ENTIRE SIMULATION? (Claims, Voting, Omega)')) {
+      if (confirm('⚠ MASTER RESET STARTING...\n\nThis will wipe:\n- All Claims\n- All Votes\n- Mission Status\n- Intro/Outro history\n\nAre you sure?')) {
         try {
           const db = window.db;
           const ref = window.ref;
           const set = window.set;
 
-          // 1. Reset Claims
+          // 1. Reset Firebase State
           await set(window.claimsRef, {});
-
-          // 2. Reset Voting State & Votes
           await set(ref(db, 'pathfinder/voting_active'), false);
           await set(ref(db, 'pathfinder/votes'), null);
           await set(ref(db, 'pathfinder/omega_revealed'), false);
+          await set(ref(db, 'pathfinder/mission_complete'), false);
+          await set(ref(db, 'pathfinder/class_size'), 25);
 
-          // 3. Clear Local State
-          localStorage.removeItem('pathfinder_omega_seen');
+          // 2. Clear Local State
+          localStorage.clear(); // Nuclear option for "Everything"
+          localStorage.removeItem('pathfinder_outro_seen'); // Explicitly ensure this is gone (redundant but safe)
 
-          window.closeTeacherDashboard();
-          window.goHome();
+          alert("✅ SIMULATION RESET COMPLETE. RELOADING...");
+          window.location.reload();
         } catch (e) {
           alert("ERROR: " + e.message);
           console.error(e);
@@ -2317,7 +2548,9 @@
     // ══════════════════════════════════════════════════
     // Wrapped in init function to wait for Firebase module
     window.initVoting = function () {
+      if (window.__votingInitDone) return;
       if (!window.db || !window.ref) { console.error("Firebase not ready"); return; }
+      window.__votingInitDone = true;
 
       const db = window.db;
       const ref = window.ref;
@@ -2358,11 +2591,37 @@
 
       // Expose start function using the captured refs
       window.startVoting = function () {
-        if (confirm("⚠ OPEN VOTING PHASE?")) {
+        if (confirm("⚠ OPEN VOTING PHASE?\n\nThis will unlock the voting card for all students.")) {
           set(votingActiveRef, true);
         }
       }
-    };
+
+      // Start Outro Listener
+      // Start Outro Listener
+      if (window.initOutroSync) window.initOutroSync();
+    }
+
+    // 2. Outro Sync Listener
+    // Outro Listener definition
+    window.initOutroSync = function () {
+      if (!window.db) return;
+      const outroRef = ref(window.db, 'pathfinder/mission_complete');
+      onValue(outroRef, (snap) => {
+        if (snap.val() === true) {
+          const seen = localStorage.getItem('pathfinder_outro_seen');
+          const overlay = document.getElementById('video-overlay');
+          const tx = document.getElementById('outro-transition');
+
+          // Only play if not seen and not currently playing
+          if (!seen && overlay.style.display !== 'block' && tx.style.display !== 'flex') {
+            playOutroSequence();
+          } else {
+            // If already seen (reloaded), ensure UI is locked
+            lockdownUI();
+          }
+        }
+      });
+    }
 
     // showVotingPhase REMOVED - replaced by grid card logic
 
@@ -2379,20 +2638,16 @@
       return vid;
     }
 
-    // UPDATED: Check for existing INDIVIDUAL vote before opening modal
-    // We remove the redeclaration of _originalOpenVote by checking if it already exists or using a different pattern
-    // Ideally we should just redefine the function directly without wrapping if possible, or use a unique name
-    // BUT simplest fix for the "redeclare" error is to remove the "const" if it was already defined, 
-    // or just define the logic inside openVoteModal directly.
-
     window.openVoteModal = async function () {
+      const db = window.db;
+      const ref = window.ref;
+      const get = window.get;
+
       const myTeam = localStorage.getItem('pathfinder_my_team');
       const mySector = localStorage.getItem('pathfinder_my_sector');
 
       // Basic check
       if (!myTeam) {
-        // Show error manually since we can't easily call the "original" if it's lost/overwritten 
-        // actually we can just copy the error logic here
         const form = document.getElementById('vote-form');
         form.innerHTML = '<div style="color:var(--red);font-size:12px;">⚠ ERROR: TEAM IDENTITY NOT FOUND.<br>You must claim a sector to identify your team before voting.</div>';
         document.getElementById('modal-vote').classList.add('open');
@@ -2400,18 +2655,19 @@
       }
 
       const vid = getVoterID();
-      // Check if WE specifically already voted
+      // Debug Check
+      console.log(`Checking vote status for Team: ${myTeam}, VID: ${vid}`);
+
       const snap = await get(ref(db, `pathfinder/votes/${myTeam}/${vid}`));
       if (snap.exists()) {
+        console.log("Vote exists. Showing results.");
         window.showResults();
       } else {
+        console.log("No vote found. Opening form.");
         // Proceed to render UI
         currentVotes = [null, null, null];
         const form = document.getElementById('vote-form');
         form.innerHTML = '';
-
-        // RENDER SLOTS... (Rest of original function logic)
-        // To avoid duplicating 100 lines of code, let's just make a render function
         _renderVoteModalContent();
       }
     }
@@ -2629,42 +2885,126 @@
       });
     }
 
-    // Add Teacher Controls for Voting
-    // We use a timeout to ensure the DOM is ready, and a more generic selector
-    setTimeout(() => {
-      const dashboard = document.getElementById('modal-teacher');
-      if (!dashboard) return;
+    // ── VIDEO SEQUENCE LOGIC ──
 
-      // Find the button container - it's the div with the reset/omega buttons
-      // It has a top border and flex display
-      const btnContainer = dashboard.querySelector('div[style*="display:flex"]');
-
-      if (btnContainer) {
-        // Check if buttons already exist to prevent duplicates
-        if (btnContainer.querySelector('.btn-vote-start')) return;
-
-        const btnVote = document.createElement('button');
-        btnVote.className = 'modal-btn btn-vote-start';
-        btnVote.onclick = () => { window.startVoting(); window.closeTeacherDashboard(); };
-        btnVote.textContent = '🗳 START VOTING';
-        btnVote.style.background = 'rgba(46,204,113,.1)';
-        btnVote.style.borderColor = 'var(--green)';
-        btnVote.style.color = 'var(--green)';
-        btnVote.style.width = 'auto';
-
-        const btnRes = document.createElement('button');
-        btnRes.className = 'modal-btn btn-vote-res';
-        btnRes.onclick = () => { window.showResults(); window.closeTeacherDashboard(); };
-        btnRes.textContent = '📊 SHOW RESULTS';
-        btnRes.style.background = 'rgba(52,152,219,.1)';
-        btnRes.style.borderColor = '#3498db';
-        btnRes.style.color = '#3498db';
-        btnRes.style.width = 'auto';
-
-        btnContainer.appendChild(btnVote);
-        btnContainer.appendChild(btnRes);
+    // 1. Check Intro on Load
+    window.addEventListener('DOMContentLoaded', () => {
+      const seen = localStorage.getItem('pathfinder_intro_seen');
+      if (!seen) {
+        document.getElementById('intro-gate').style.display = 'flex';
       }
-    }, 1000);
+    });
+
+    window.playIntroVideo = function () {
+      document.getElementById('intro-gate').style.display = 'none';
+      const overlay = document.getElementById('video-overlay');
+      const video = document.getElementById('main-video');
+
+      overlay.style.display = 'flex';
+      video.style.display = 'block';
+      video.src = "assets/intro.mp4";
+      video.volume = 1.0;
+
+      video.onended = function () {
+        // Don't close overlay yet - show end screen
+        video.style.display = 'none';
+        document.getElementById('intro-end-screen').style.display = 'flex';
+      };
+
+      video.play().catch(e => {
+        console.log("Autoplay blocked, user interaction needed", e);
+        // Fallback: just close it if it fails
+        overlay.style.display = 'none';
+        localStorage.setItem('pathfinder_intro_seen', 'true');
+      });
+    }
+
+    window.finishIntro = function () {
+      document.getElementById('intro-end-screen').style.display = 'none';
+      document.getElementById('video-overlay').style.display = 'none';
+      localStorage.setItem('pathfinder_intro_seen', 'true');
+    }
+
+    window.triggerOutro = function () {
+      if (!confirm("⚠ TRANSMIT FINAL DECISION TO EARTH? (Plays for EVERYONE)")) return;
+      const db = window.db;
+      const ref = window.ref;
+      const set = window.set;
+      set(ref(db, 'pathfinder/mission_complete'), true);
+      window.closeTeacherDashboard();
+    }
+
+    window.playOutroSequence = function () {
+      const overlay = document.getElementById('video-overlay');
+      const video = document.getElementById('main-video');
+      const tx = document.getElementById('outro-transition');
+      const txText = document.getElementById('outro-tx-text');
+
+      // Check if already playing
+      if (overlay.style.display === 'block' || tx.style.display === 'flex') return;
+
+      // Mark as seen immediately to prevent loop on quick refresh
+      localStorage.setItem('pathfinder_outro_seen', 'true');
+
+      // 1. Play Transmission Animation
+      tx.style.display = 'flex';
+      txText.innerHTML = '> INITIALIZING UPLINK...';
+
+      setTimeout(() => { txText.innerHTML += '<br>> CONNECTED.'; }, 1000);
+      setTimeout(() => { txText.innerHTML += '<br>> UPLOADING FINAL COORDINATES...'; }, 2000);
+      setTimeout(() => {
+        txText.innerHTML += '<br>> <span style="color:#fff">TRANSMISSION ESTABLISHED.</span>';
+      }, 3500);
+
+      // 2. Switch to Video
+      setTimeout(() => {
+        tx.style.display = 'none';
+        overlay.style.display = 'flex';
+        video.style.display = 'block';
+        video.src = "assets/outro.mp4";
+        video.volume = 1.0;
+
+        video.onended = function () {
+          video.style.display = 'none';
+          document.getElementById('intro-end-screen').style.display = 'flex';
+          lockdownUI();
+        };
+
+        video.play().catch(e => console.error("Auto-play blocked:", e));
+      }, 4500);
+    }
+
+    function lockdownUI() {
+      // 1. Update Status Bar
+      const fuel = document.getElementById('fuel-status');
+      if (fuel) {
+        fuel.style.cssText = "background:var(--green-dim);border-color:var(--green);color:var(--green);animation:none;";
+        fuel.innerText = "✓ LANDING SUCCESSFUL";
+      }
+
+      // 2. Disable Grid & Cards
+      const grid = document.getElementById('sector-grid');
+      if (grid) {
+        grid.style.pointerEvents = 'none';
+        grid.style.filter = 'grayscale(0.8) opacity(0.5)';
+      }
+
+      // 3. Disable Voting
+      // (Handled by grid pointer-events but good to be explicit if modal is open)
+      const voteModal = document.getElementById('modal-vote');
+      if (voteModal && voteModal.classList.contains('open')) {
+        window.closeVoteModal();
+      }
+    }
+
+    // ── SYSTEM INITIALIZATION ──
+    const _sysInit = setInterval(() => {
+      if (window.db && window.ref && window.initVoting) {
+        clearInterval(_sysInit);
+        window.initVoting();
+        console.log("✅ SYSTEM ONLINE: Voting & Outro Sync Active");
+      }
+    }, 500);
   </script>
 </body>
 
