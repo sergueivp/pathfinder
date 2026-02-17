@@ -1612,9 +1612,18 @@
           RESULT</button>
 
         <!-- MASTER RESET -->
-        <button class="modal-btn"
-          style="background:rgba(255,0,0,0.2);border-color:red;color:red;width:auto;margin-top:12px;"
-          onclick="window.teacherResetAll()">☠ MASTER RESET</button>
+        <div
+          style="width:100%;display:flex;gap:10px;justify-content:center;margin-top:10px;border-top:1px solid var(--border);padding-top:15px;flex-wrap:wrap;">
+          <button class="modal-btn" onclick="window.teacherSoftReset();window.closeTeacherDashboard()"
+            style="background:rgba(230, 126, 34, 0.1);border-color:var(--amber);color:var(--amber);width:auto;font-size:10px;">
+            ⚠ RESET DATA (KEEP CONNECTIONS)
+          </button>
+
+          <button class="modal-btn" onclick="window.teacherHardReset();window.closeTeacherDashboard()"
+            style="background:rgba(232,64,64,.1);border-color:var(--red);color:var(--red);width:auto;font-size:10px;">
+            ☢ HARD RESET (RELOAD ALL)
+          </button>
+        </div>
       </div>
       <button class="modal-cancel" onclick="window.closeTeacherDashboard()" style="margin-top:16px;">CLOSE
         DASHBOARD</button>
@@ -2530,33 +2539,57 @@
       }
     }
 
-    window.teacherResetAll = async function () {
-      if (confirm('⚠ MASTER RESET STARTING...\n\nThis will wipe:\n- All Claims\n- All Votes\n- Mission Status\n- Intro/Outro history\n\nAre you sure?')) {
+    // SHARED RESET LOGIC
+    async function _wipeFirebaseData() {
+      const db = window.db;
+      const ref = window.ref;
+      const set = window.set;
+
+      await set(window.claimsRef, {});
+      await set(ref(db, 'pathfinder/mission_start'), false);
+      await set(ref(db, 'pathfinder/voting_active'), false);
+      await set(ref(db, 'pathfinder/votes'), null);
+      await set(ref(db, 'pathfinder/omega_revealed'), false);
+      await set(ref(db, 'pathfinder/mission_complete'), false);
+      await set(ref(db, 'pathfinder/class_size'), 25);
+    }
+
+    // 1. SOFT RESET: Clears data, keeps students connected
+    window.teacherSoftReset = async function () {
+      if (!confirm("⚠ SOFT RESET: This will wipe all CLAIMS and VOTES, but keep students connected.\n\nUse this to restart the activity without forcing a reload.\n\nProceed?")) return;
+
+      try {
+        await _wipeFirebaseData();
+        alert("✅ DATA WIPED. Simulation ready for restart.");
+      } catch (e) {
+        alert("Error: " + e.message);
+      }
+    }
+
+    // 2. HARD RESET: Clears data AND forces client reload
+    window.teacherHardReset = async function () {
+      if (confirm('☢ HARD RESET: This will wipe EVERYTHING and FORCE RELOAD all student devices.\n\nUse this if screens are stuck or you want a total fresh start.\n\nAre you sure?')) {
         try {
           const db = window.db;
           const ref = window.ref;
           const set = window.set;
 
-          // 1. Reset Firebase State
-          await set(window.claimsRef, {});
-          await set(ref(db, 'pathfinder/mission_start'), false);
-          await set(ref(db, 'pathfinder/voting_active'), false);
-          await set(ref(db, 'pathfinder/votes'), null);
-          await set(ref(db, 'pathfinder/omega_revealed'), false);
-          await set(ref(db, 'pathfinder/mission_complete'), false);
-          await set(ref(db, 'pathfinder/class_size'), 25);
+          // 1. Reset Data
+          await _wipeFirebaseData();
 
-          // 2. Trigger Global Wipe for all clients
+          // 2. Trigger Global Wipe
           await set(ref(db, 'pathfinder/reset_trigger'), Date.now());
 
-          // 3. Clear Local State (Self)
+          // 3. Clear Local State (Self) but KEEP IDENTITY
+          const wasCommander = localStorage.getItem('pathfinder_role') === 'commander' || window.location.search.includes('commander');
+
           localStorage.clear();
-          // Preserve commander role if present (optional, but nice for teacher)
-          if (window.location.search.includes('commander')) {
+
+          if (wasCommander) {
             localStorage.setItem('pathfinder_role', 'commander');
           }
 
-          alert("✅ SIMULATION RESET COMPLETE. RELOADING...");
+          // No alert, just reload (matches student experience)
           window.location.reload();
         } catch (e) {
           alert("ERROR: " + e.message);
