@@ -2358,32 +2358,21 @@
     };
 
     window.execOmegaReveal = function () {
-      // 1. ALWAYS UPDATE DATA (So it's correct on refresh)
+      // 1. PICK THE OMEGA TARGET
+      // Priority: 'omega' (Amazonis Planitia) first — it's the designed Omega target.
+      // If Amazonis was claimed by a team, fall back to other unclaimed sectors
+      // in a defined priority order (not random). If everything is claimed, default to 'omega'.
       const claims = window.__claims || {};
-      const allKeys = Object.keys(TEASER);
-      const unclaimedKey = allKeys.find(k => !claims[k]);
 
-      let targetName = 'SECTOR OMEGA';
-      let targetLoc = 'UNKNOWN LOCATION';
+      const OMEGA_PRIORITY = ['omega', 'olympus', 'valles', 'jezero', 'hellas', 'arabia', 'vastitas'];
+      const omegaKey = OMEGA_PRIORITY.find(k => !claims[k]) || 'omega';
 
-      if (unclaimedKey) {
-        const origName = TEASER[unclaimedKey].name;
-        if (origName.includes('(REVEALED)')) {
-          targetName = origName.replace(' (REVEALED)', '');
-          targetLoc = TEASER[unclaimedKey].loc;
-          FULL[unclaimedKey] = JSON.parse(JSON.stringify(REAL_OMEGA_FULL));
-        } else {
-          const origLoc = TEASER[unclaimedKey].loc;
-          targetName = origName;
-          targetLoc = origLoc;
+      let targetName = TEASER[omegaKey].name;
+      let targetLoc = TEASER[omegaKey].loc;
 
-          // Update internally
-          // Update internally
-          FULL[unclaimedKey] = JSON.parse(JSON.stringify(REAL_OMEGA_FULL));
-          TEASER[unclaimedKey].name = origName; // Keep original name
-          TEASER[unclaimedKey].pills.unshift({ t: 'UPDATED ANALYSIS', c: 'pg' });
-        }
-      }
+      // Inject the classified full data into the chosen slot
+      FULL[omegaKey] = JSON.parse(JSON.stringify(REAL_OMEGA_FULL));
+      TEASER[omegaKey].pills = [{ t: 'UPDATED ANALYSIS', c: 'pg' }, ...TEASER[omegaKey].pills.filter(p => p.t !== 'UPDATED ANALYSIS')];
 
       // 2. DECIDE: DRAMATIC OVERLAY OR SILENT UPDATE?
       const alreadySeen = localStorage.getItem('pathfinder_omega_seen');
